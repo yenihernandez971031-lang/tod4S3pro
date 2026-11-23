@@ -107,8 +107,8 @@ import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 
 public final class MainActivity extends ComponentActivity {
-    private static final String API_BASE = "https://tod4s3-production-abe8925f.up.railway.app";
-    private static final String UPDATE_MANIFEST_URL = "https://github.com/eduardolubin402-hub/Tod4S3/raw/refs/heads/main/web/android-update.json";
+    private static final String API_BASE = "https://tod4s3pro-production.up.railway.app";
+    private static final String UPDATE_MANIFEST_URL = "https://github.com/yenihernandez971031-lang/tod4S3pro/raw/refs/heads/main/web/android-update.json";
     private static final String LOG_TAG = "Tod4S3Sync";
     private static final String KEY_ALIAS = "tod4s3.sync.todus.credentials.v1";
     private static final String PREF_TODUS_PHONE = "todus_phone_enc";

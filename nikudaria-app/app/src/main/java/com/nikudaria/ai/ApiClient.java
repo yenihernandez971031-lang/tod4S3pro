@@ -19,7 +19,7 @@ import java.util.UUID;
 
 /** Direct, unauthenticated HTTPS client. Network methods run off the UI thread. */
 public final class ApiClient {
-    public static final String API_BASE = "https://tod4s3-production-abe8925f.up.railway.app";
+    public static final String API_BASE = "https://tod4s3pro-production.up.railway.app";
     private static final String PREFS = "nikudaria_private";
     private static final String KEY_CLIENT_ID = "client_id";
     private final SharedPreferences prefs;

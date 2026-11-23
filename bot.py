@@ -5386,7 +5386,7 @@ def validate_android_update_manifest(manifest: object) -> dict[str, object]:
         parsed.scheme != "https"
         or parsed.hostname != "raw.githubusercontent.com"
         or parsed.username or parsed.password
-        or not parsed.path.startswith("/eduardolubin402-hub/Tod4S3/main/")
+        or not parsed.path.startswith("/yenihernandez971031-lang/tod4S3pro/main/")
         or Path(parsed.path).name not in expected_filenames
         or parsed.query or parsed.fragment
     ):

@@ -46,7 +46,7 @@ import java.util.concurrent.Executors;
 
 /** Independent AiTod4S3 client. It never uses Tod4S3 Sync pairing or Premium. */
 public final class AiActivity extends Activity {
-    private static final String API = "https://tod4s3-production-abe8925f.up.railway.app";
+    private static final String API = "https://tod4s3pro-production.up.railway.app";
     private static final int BG = Color.rgb(12, 13, 19);
     private static final int PANEL = Color.rgb(25, 27, 36);
     private static final int RED = Color.rgb(255, 59, 87);

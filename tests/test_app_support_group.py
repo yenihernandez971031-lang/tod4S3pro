@@ -51,7 +51,7 @@ def test_update_manifest_requires_exact_repository_file_and_hash():
     manifest = {
         "version_code": 79,
         "version_name": "1.5.34",
-        "apk_url": "https://raw.githubusercontent.com/eduardolubin402-hub/Tod4S3/main/Tod4S3-Sync-v1.5.34.apk",
+        "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/Tod4S3-Sync-v1.5.34.apk",
         "sha256": "a" * 64,
     }
     release = bot.validate_android_update_manifest(manifest)
@@ -108,7 +108,7 @@ def test_group_release_is_sent_only_to_the_group(monkeypatch):
     release = {
         "version_code": 79,
         "version_name": "1.5.34",
-        "apk_url": "https://raw.githubusercontent.com/eduardolubin402-hub/Tod4S3/main/Tod4S3-Sync-v1.5.34.apk",
+        "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/Tod4S3-Sync-v1.5.34.apk",
         "filename": "Tod4S3-Sync-v1.5.34.apk",
         "sha256": hashlib.sha256(release_bytes).hexdigest(),
         "data": release_bytes,
@@ -155,7 +155,7 @@ def test_failed_apk_attachment_replies_without_markup_or_github_link(monkeypatch
     release = {
         "version_code": 79,
         "version_name": "1.5.34",
-        "apk_url": "https://raw.githubusercontent.com/eduardolubin402-hub/Tod4S3/main/Tod4S3-Sync-v1.5.34.apk",
+        "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/Tod4S3-Sync-v1.5.34.apk",
         "filename": "Tod4S3-Sync-v1.5.34.apk",
         "sha256": hashlib.sha256(release_bytes).hexdigest(),
         "data": release_bytes,

@@ -3,9 +3,9 @@ from __future__ import annotations
 
 import os
 
-DEFAULT_PUBLIC_SITE_URL = "https://tod4s3-production-abe8925f.up.railway.app"
+DEFAULT_PUBLIC_SITE_URL = "https://tod4s3pro-production.up.railway.app"
 ANDROID_UPDATE_MANIFEST_URL = (
-    "https://raw.githubusercontent.com/eduardolubin402-hub/Tod4S3/main/web/android-update.json"
+    "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/web/android-update.json"
 )
 
 
