@@ -7,12 +7,25 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.LinearGradient;
+import android.graphics.Shader;
 import android.graphics.drawable.GradientDrawable;
+import android.animation.ObjectAnimator;
+import android.animation.PropertyValuesHolder;
 import android.os.Bundle;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.RecognitionListener;
 import android.speech.tts.TextToSpeech;
+import android.app.Dialog;
+import android.view.Window;
+import android.view.WindowManager;
 import android.text.InputType;
+import android.text.InputFilter;
 import android.view.Gravity;
 import android.view.View;
 import android.view.inputmethod.EditorInfo;
@@ -66,7 +79,15 @@ public final class AiActivity extends Activity {
     private TextView chatStatus;
     private Button loginButton;
     private ImageButton sendButton;
+    private ImageButton callButton;
     private Switch speakSwitch;
+    private SpeechRecognizer speechRecognizer;
+    private Dialog voiceCallDialog;
+    private FrameLayout voiceCallOrb;
+    private TextView voiceCallStatus;
+    private boolean voiceCallActive = false;
+    private boolean voiceCallSpeaking = false;
+    private long speechStartedAt;
     private boolean sending = false;
     private boolean ttsReady = false;
     private boolean micPermissionPending = false;
@@ -93,34 +114,50 @@ public final class AiActivity extends Activity {
 
     private void showLogin() {
         root = base();
+        FrameLayout stage = new FrameLayout(this);
+        stage.addView(new ConstellationView(this), new FrameLayout.LayoutParams(-1, -1));
         LinearLayout content = column();
-        content.setGravity(Gravity.CENTER_VERTICAL);
-        content.setPadding(dp(26), dp(34), dp(26), dp(34));
-        TextView mark = label("✦", 40, true, RED);
-        mark.setGravity(Gravity.CENTER);
-        content.addView(mark, lp(-1, dp(62)));
+        content.setGravity(Gravity.CENTER_HORIZONTAL);
+        content.setPadding(dp(24), dp(22), dp(24), dp(18));
+        TextView online = label("●  IA en línea", 12, true, Color.rgb(82, 235, 151));
+        online.setGravity(Gravity.CENTER);
+        online.setPadding(dp(12), dp(6), dp(12), dp(6));
+        online.setBackground(roundStroke(Color.argb(35, 82, 235, 151), 18, Color.argb(140, 82, 235, 151)));
+        content.addView(online, lp(-2, -2));
+        FrameLayout orb = createAiOrb(dp(142));
+        content.addView(orb, lp(142, 142));
         TextView title = label("AiTod4S3", 31, true, Color.WHITE);
         title.setGravity(Gravity.CENTER);
-        content.addView(title, lp(-1, dp(44)));
+        title.setLetterSpacing(.08f);
+        content.addView(title, margins(-1, -2, 0, 12, 0, 0));
         TextView subtitle = label("Tu asistente inteligente", 15, false, Color.rgb(167, 172, 188));
         subtitle.setGravity(Gravity.CENTER);
-        content.addView(subtitle, lp(-1, dp(32)));
-        space(content, 22);
+        content.addView(subtitle, margins(-1, -2, 0, 0, 0, 22));
         userField = edit("Usuario", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        content.addView(userField, lp(-1, dp(54)));
+        userField.setHint("Usuario");
+        content.addView(userField, lp(-1, dp(58)));
         space(content, 12);
         passwordField = edit("Contraseña", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         passwordField.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        content.addView(passwordField, lp(-1, dp(54)));
-        space(content, 16);
-        loginButton = button("INICIAR SESIÓN", RED);
+        content.addView(passwordField, lp(-1, dp(58)));
+        space(content, 15);
+        loginButton = button("INICIAR SESIÓN  →", RED);
         loginButton.setOnClickListener(v -> login());
-        content.addView(loginButton, lp(-1, dp(52)));
-        status = label("Acceso con la cuenta AiTod4S3 que te creó el administrador.", 13, false, Color.rgb(151, 157, 174));
+        content.addView(loginButton, lp(-1, dp(56)));
+        status = label("🔒  Acceso con la cuenta AiTod4S3 que te creó el administrador.", 13, false, Color.rgb(181, 188, 201));
         status.setGravity(Gravity.CENTER);
-        status.setPadding(0, dp(12), 0, 0);
-        content.addView(status, lp(-1, -2));
-        root.addView(content, new LinearLayout.LayoutParams(-1, 0, 1f));
+        status.setPadding(dp(12), dp(12), dp(12), dp(12));
+        status.setBackground(roundStroke(Color.argb(38, 255, 255, 255), 16, Color.argb(45, 255, 255, 255)));
+        content.addView(status, margins(-1, -2, 0, 14, 0, 0));
+        TextView footer = label("Conexión cifrada  ·  ✦", 11, false, Color.rgb(121, 128, 147));
+        footer.setGravity(Gravity.CENTER);
+        content.addView(footer, lp(-1, -2));
+        stage.addView(content, new FrameLayout.LayoutParams(-1, -1));
+        root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
+        ObjectAnimator breathe = ObjectAnimator.ofPropertyValuesHolder(orb,
+                PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.035f, 1f),
+                PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.035f, 1f));
+        breathe.setDuration(1800); breathe.setRepeatCount(ObjectAnimator.INFINITE); breathe.start();
     }
 
     private void login() {
@@ -169,6 +206,10 @@ public final class AiActivity extends Activity {
         chatStatus = label("en línea", 12, true, Color.rgb(53, 224, 140));
         identity.addView(chatStatus, lp(-1, -2));
         header.addView(identity, new LinearLayout.LayoutParams(0, -2, 1f));
+        callButton = iconButton(R.drawable.ic_mic, Color.WHITE, "Iniciar llamada de voz con AiTod4S3");
+        callButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
+        callButton.setOnClickListener(v -> toggleVoiceCall());
+        header.addView(callButton, lp(42, 42));
         Button logout = button("SALIR", PANEL);
         logout.setTextSize(11);
         logout.setBackground(roundStroke(PANEL, 14, Color.rgb(78, 82, 98)));
@@ -220,6 +261,7 @@ public final class AiActivity extends Activity {
         composer.setPadding(dp(7), 0, dp(5), 0);
         composer.setBackgroundColor(Color.TRANSPARENT);
         composer.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(2500)});
         composer.setImeOptions(EditorInfo.IME_ACTION_SEND);
         composerRow.addView(composer, new LinearLayout.LayoutParams(0, dp(44), 1f));
         ImageButton mic = iconButton(R.drawable.ic_mic, Color.WHITE, "Dictar mensaje por voz");
@@ -275,8 +317,11 @@ public final class AiActivity extends Activity {
                         saveHistory();
                     } catch (JSONException ignored) { }
                     addBubble(reply, false);
-                    if (speakSwitch != null && speakSwitch.isChecked() && ttsReady && tts != null)
+                    if (((speakSwitch != null && speakSwitch.isChecked()) || voiceCallActive) && ttsReady && tts != null) {
+                        voiceCallSpeaking = voiceCallActive;
                         tts.speak(reply, TextToSpeech.QUEUE_FLUSH, null, "aitod4s3-reply");
+                        if (voiceCallActive) postDelayedVoiceListening(reply);
+                    }
                     sending = false;
                     sendButton.setEnabled(true);
                     if (chatStatus != null) chatStatus.setText("en línea");
@@ -477,6 +522,10 @@ public final class AiActivity extends Activity {
         background.setStroke(dp(1), Color.argb(70, 255, 255, 255));
         orb.setBackground(background);
         orb.setElevation(dp(4));
+        FrameLayout ring = new FrameLayout(this);
+        ring.setBackground(roundStroke(Color.TRANSPARENT, 100, Color.argb(115, 255, 196, 62)));
+        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(size + dp(18), size + dp(18), Gravity.CENTER);
+        orb.addView(ring, ringParams);
         ImageView sparkle = new ImageView(this);
         sparkle.setImageResource(R.drawable.ic_ai_sparkle);
         sparkle.setColorFilter(Color.argb(230, 255, 255, 255));
@@ -525,6 +574,87 @@ public final class AiActivity extends Activity {
         }
     }
 
+    private void toggleVoiceCall() {
+        if (voiceCallActive) { stopVoiceCall(); return; }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 18); return;
+        }
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "El dictado de voz no está disponible en este teléfono.", Toast.LENGTH_LONG).show(); return;
+        }
+        voiceCallActive = true;
+        if (callButton != null) callButton.setBackground(gradientRound(new int[]{RED, Color.rgb(193, 18, 46)}, 15));
+        showVoiceCallDialog(); beginVoiceRecognition();
+    }
+
+    private void beginVoiceRecognition() {
+        if (!voiceCallActive) return;
+        if (speechRecognizer == null) speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.cancel();
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle params) { setVoiceCallStatus("ESCUCHANDO…"); }
+            @Override public void onBeginningOfSpeech() { speechStartedAt = SystemClock.uptimeMillis(); }
+            @Override public void onRmsChanged(float rms) { }
+            @Override public void onBufferReceived(byte[] buffer) { }
+            @Override public void onEndOfSpeech() { setVoiceCallStatus("PROCESANDO…"); }
+            @Override public void onError(int error) { if (voiceCallActive && !sending) postDelayed(() -> beginVoiceRecognition(), 180); }
+            @Override public void onResults(Bundle results) {
+                ArrayList<String> values = results == null ? null : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                String phrase = values == null || values.isEmpty() ? "" : values.get(0).trim();
+                long duration = speechStartedAt == 0 ? 1000 : SystemClock.uptimeMillis() - speechStartedAt;
+                if (phrase.length() >= 2 && (duration >= 180 || phrase.length() >= 5) && composer != null && voiceCallActive) {
+                    composer.setText(phrase); composer.setSelection(composer.length()); setVoiceCallStatus("CONECTANDO CON LA IA…"); sendMessage();
+                } else if (voiceCallActive) postDelayed(() -> beginVoiceRecognition(), 150);
+            }
+            @Override public void onPartialResults(Bundle partialResults) { }
+            @Override public void onEvent(int eventType, Bundle params) { }
+        });
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-CU");
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla con AiTod4S3");
+        speechRecognizer.startListening(intent);
+    }
+
+    private void postDelayedVoiceListening(String reply) {
+        long delay = Math.max(1200L, Math.min(9000L, reply.length() * 48L));
+        postDelayed(() -> { voiceCallSpeaking = false; if (voiceCallActive && !sending) beginVoiceRecognition(); }, delay);
+    }
+
+    private void showVoiceCallDialog() {
+        LinearLayout panel = column(); panel.setGravity(Gravity.CENTER_HORIZONTAL);
+        panel.setPadding(dp(26), dp(34), dp(26), dp(24)); panel.setBackgroundColor(Color.rgb(7, 8, 12));
+        TextView eyebrow = label("LLAMADA DE VOZ", 11, true, Color.rgb(255, 122, 137)); eyebrow.setGravity(Gravity.CENTER);
+        panel.addView(eyebrow, lp(-1, -2));
+        TextView heading = label("AiTod4S3", 29, true, Color.WHITE); heading.setGravity(Gravity.CENTER);
+        panel.addView(heading, margins(-1, -2, 0, 8, 0, 3));
+        TextView hint = label("Habla normalmente. La IA te responderá en voz alta.", 13, false, Color.rgb(170, 176, 194)); hint.setGravity(Gravity.CENTER);
+        panel.addView(hint, margins(-1, -2, 0, 0, 0, 28));
+        voiceCallOrb = createAiOrb(dp(150)); panel.addView(voiceCallOrb, lp(150, 150));
+        voiceCallStatus = label("CONECTANDO…", 14, true, Color.rgb(96, 226, 244)); voiceCallStatus.setGravity(Gravity.CENTER);
+        panel.addView(voiceCallStatus, margins(-1, -2, 0, 24, 0, 7));
+        TextView flow = label("Escuchando → procesando → respondiendo", 12, false, Color.rgb(138, 144, 166)); flow.setGravity(Gravity.CENTER);
+        panel.addView(flow, margins(-1, -2, 0, 0, 0, 28));
+        Button hangup = button("FINALIZAR LLAMADA", RED); hangup.setOnClickListener(v -> stopVoiceCall()); panel.addView(hangup, lp(-1, 54));
+        voiceCallDialog = new Dialog(this); voiceCallDialog.setContentView(panel); voiceCallDialog.setCancelable(false); voiceCallDialog.show();
+        Window window = voiceCallDialog.getWindow();
+        if (window != null) { window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.rgb(7, 8, 12))); window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT); }
+        ObjectAnimator pulse = ObjectAnimator.ofPropertyValuesHolder(voiceCallOrb, PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.08f, 1f), PropertyValuesHolder.ofFloat(View.SCALE_Y, 1f, 1.08f, 1f));
+        pulse.setDuration(900); pulse.setRepeatCount(ObjectAnimator.INFINITE); pulse.start();
+    }
+
+    private void setVoiceCallStatus(String value) { if (voiceCallStatus != null) voiceCallStatus.setText(value); }
+    private void stopVoiceCall() {
+        voiceCallActive = false; voiceCallSpeaking = false;
+        if (speechRecognizer != null) speechRecognizer.cancel(); if (tts != null) tts.stop();
+        if (voiceCallDialog != null) { voiceCallDialog.dismiss(); voiceCallDialog = null; }
+        voiceCallOrb = null; voiceCallStatus = null;
+        if (callButton != null) callButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
+    }
+
+    private void postDelayed(Runnable action, long delay) { getWindow().getDecorView().postDelayed(action, delay); }
+
     private String friendlyError(Exception e) {
         String raw = e.getMessage() == null ? "" : e.getMessage();
         if (raw.contains("invalid_credentials")) return "Usuario o contraseña incorrectos.";
@@ -536,6 +666,21 @@ public final class AiActivity extends Activity {
         if (raw.contains("ai_not_configured") || raw.contains("ai_unavailable")) return "La IA no está disponible temporalmente.";
         if (raw.contains("UnknownHostException") || raw.contains("ConnectException")) return "No hay conexión con AiTod4S3. Comprueba Internet.";
         return "No se pudo completar la solicitud. Comprueba la conexión e inténtalo de nuevo.";
+    }
+
+    private final class ConstellationView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final float[][] points = {{.08f,.16f},{.22f,.09f},{.39f,.19f},{.62f,.11f},{.84f,.18f},{.14f,.39f},{.31f,.31f},{.52f,.38f},{.76f,.34f},{.91f,.48f},{.07f,.68f},{.27f,.58f},{.47f,.69f},{.69f,.59f},{.88f,.76f}};
+        ConstellationView(android.content.Context context) { super(context); paint.setStrokeWidth(dp(1)); }
+        @Override protected void onDraw(Canvas canvas) {
+            super.onDraw(canvas); canvas.drawColor(Color.rgb(7, 9, 17));
+            float w=getWidth(), h=getHeight();
+            paint.setStyle(Paint.Style.STROKE); paint.setColor(Color.argb(34,255,102,82));
+            for (int i=0;i<points.length-1;i++) canvas.drawLine(points[i][0]*w,points[i][1]*h,points[i+1][0]*w,points[i+1][1]*h,paint);
+            paint.setStyle(Paint.Style.FILL);
+            for (int i=0;i<points.length;i++) { int c=i%3==0?Color.rgb(255,92,78):i%3==1?Color.rgb(255,196,62):Color.WHITE; paint.setColor(Color.argb(150,c>>16&255,c>>8&255,c&255)); canvas.drawCircle(points[i][0]*w,points[i][1]*h,dp(i%4==0?2:1),paint); }
+            postInvalidateDelayed(1200);
+        }
     }
 
     private LinearLayout base() {
