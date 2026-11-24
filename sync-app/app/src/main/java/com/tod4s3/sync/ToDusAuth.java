@@ -104,9 +104,13 @@ final class ToDusAuth {
             throw new IOException("ToDus no devolvió la clave de sesión.");
         }
 
+        // ToDus ha servido una respuesta heredada con cabecera fija y otra con
+        // la clave como texto dentro de un protobuf. No tomamos bytes
+        // arbitrarios del body: una clave truncada no permite iniciar sesión.
         for (int i = 0; i < response.length; i++) {
             if (response[i] == '`' && response.length - i - 1 >= 96) {
-                return new String(response, i + 1, 96, StandardCharsets.UTF_8).trim();
+                String candidate = printableTrim(response, i + 1, 96);
+                if (isSessionPassword(candidate)) return candidate;
             }
         }
 
@@ -114,11 +118,91 @@ final class ToDusAuth {
         Matcher hexPassword = PASSWORD_PATTERN.matcher(latin);
         if (hexPassword.find()) return hexPassword.group();
 
+        String protobufCandidate = findLengthDelimitedPassword(response);
+        if (!protobufCandidate.isEmpty()) return protobufCandidate;
+
         if (response.length >= 166) {
-            String legacyField = new String(response, 5, 161, StandardCharsets.UTF_8).trim();
+            String legacyField = printableTrim(response, 5, 161);
             if (!legacyField.isEmpty()) return legacyField;
         }
+
+        // Último formato observado por el SDK de ToDus: body de texto
+        // imprimible sin delimitador reconocible.
+        String printable = printableTrim(response, 0, response.length);
+        if (printable.length() >= 96) {
+            String candidate = printable.substring(0, 96).trim();
+            if (isSessionPassword(candidate)) return candidate;
+        }
         throw new IOException("No se pudo interpretar la clave de sesión que devolvió ToDus.");
+    }
+
+    private static String findLengthDelimitedPassword(byte[] response) {
+        int offset = 0;
+        while (offset < response.length) {
+            int tag = readVarint(response, offset);
+            int tagBytes = varintSize(response, offset);
+            if (tag < 0 || tagBytes == 0) break;
+            offset += tagBytes;
+            int wireType = tag & 7;
+            if (wireType != 2) {
+                int skipped = skipWireValue(response, offset, wireType);
+                if (skipped < 0) break;
+                offset = skipped;
+                continue;
+            }
+            int length = readVarint(response, offset);
+            int lengthBytes = varintSize(response, offset);
+            if (length < 0 || lengthBytes == 0) break;
+            offset += lengthBytes;
+            if (length > response.length - offset) break;
+            String candidate = printableTrim(response, offset, length);
+            if (isSessionPassword(candidate)) return candidate;
+            offset += length;
+        }
+        return "";
+    }
+
+    private static int readVarint(byte[] data, int offset) {
+        long value = 0L;
+        int shift = 0;
+        for (int i = offset; i < data.length && i < offset + 5; i++) {
+            int b = data[i] & 0xff;
+            value |= (long) (b & 0x7f) << shift;
+            if ((b & 0x80) == 0) return value > Integer.MAX_VALUE ? -1 : (int) value;
+            shift += 7;
+        }
+        return -1;
+    }
+
+    private static int varintSize(byte[] data, int offset) {
+        if (offset >= data.length) return 0;
+        for (int i = offset; i < data.length && i < offset + 5; i++) {
+            if ((data[i] & 0x80) == 0) return i - offset + 1;
+        }
+        return 0;
+    }
+
+    private static int skipWireValue(byte[] data, int offset, int wireType) {
+        if (wireType == 0) {
+            int size = varintSize(data, offset);
+            return size == 0 ? -1 : offset + size;
+        }
+        if (wireType == 1) return offset + 8 <= data.length ? offset + 8 : -1;
+        if (wireType == 5) return offset + 4 <= data.length ? offset + 4 : -1;
+        return -1;
+    }
+
+    private static String printableTrim(byte[] data, int offset, int length) {
+        if (offset < 0 || length < 0 || offset > data.length - length) return "";
+        String value = new String(data, offset, length, StandardCharsets.UTF_8).trim();
+        for (int i = 0; i < value.length(); i++) {
+            if (Character.isISOControl(value.charAt(i)) && !Character.isWhitespace(value.charAt(i))) return "";
+        }
+        return value;
+    }
+
+    private static boolean isSessionPassword(String candidate) {
+        return candidate != null && candidate.length() == 96 && !candidate.matches(".*\\s.*");
     }
 
     private static byte[] post(String endpoint, byte[] payload) throws Exception {
