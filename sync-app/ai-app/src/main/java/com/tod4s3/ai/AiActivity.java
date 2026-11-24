@@ -133,18 +133,19 @@ public final class AiActivity extends Activity {
         TextView subtitle = label("Tu asistente inteligente", 15, false, Color.rgb(167, 172, 188));
         subtitle.setGravity(Gravity.CENTER);
         content.addView(subtitle, margins(-1, -2, 0, 0, 0, 22));
-        userField = edit("Usuario", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        userField.setHint("Usuario");
-        content.addView(userField, lp(-1, dp(58)));
+        FrameLayout userBox = crystalField("◯", "Usuario", false);
+        userField = (EditText) userBox.getTag();
+        content.addView(userBox, lp(-1, dp(62)));
         space(content, 12);
-        passwordField = edit("Contraseña", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        FrameLayout passwordBox = crystalField("▢", "Contraseña", true);
+        passwordField = (EditText) passwordBox.getTag();
         passwordField.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        content.addView(passwordField, lp(-1, dp(58)));
+        content.addView(passwordBox, lp(-1, dp(62)));
         space(content, 15);
         loginButton = button("INICIAR SESIÓN  →", RED);
         loginButton.setOnClickListener(v -> login());
         content.addView(loginButton, lp(-1, dp(56)));
-        status = label("🔒  Acceso con la cuenta AiTod4S3 que te creó el administrador.", 13, false, Color.rgb(181, 188, 201));
+        status = label("▢  Acceso con la cuenta AiTod4S3 que te creó el administrador.", 12, false, Color.rgb(181, 188, 201));
         status.setGravity(Gravity.CENTER);
         status.setPadding(dp(12), dp(12), dp(12), dp(12));
         status.setBackground(roundStroke(Color.argb(38, 255, 255, 255), 16, Color.argb(45, 255, 255, 255)));
@@ -152,7 +153,9 @@ public final class AiActivity extends Activity {
         TextView footer = label("Conexión cifrada  ·  ✦", 11, false, Color.rgb(121, 128, 147));
         footer.setGravity(Gravity.CENTER);
         content.addView(footer, lp(-1, -2));
-        stage.addView(content, new FrameLayout.LayoutParams(-1, -1));
+        FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
+                Math.min(dp(390), getResources().getDisplayMetrics().widthPixels - dp(28)), -1, Gravity.CENTER);
+        stage.addView(content, contentParams);
         root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
         ObjectAnimator breathe = ObjectAnimator.ofPropertyValuesHolder(orb,
                 PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.035f, 1f),
@@ -524,8 +527,12 @@ public final class AiActivity extends Activity {
         orb.setElevation(dp(4));
         FrameLayout ring = new FrameLayout(this);
         ring.setBackground(roundStroke(Color.TRANSPARENT, 100, Color.argb(115, 255, 196, 62)));
-        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(size + dp(18), size + dp(18), Gravity.CENTER);
+        FrameLayout.LayoutParams ringParams = new FrameLayout.LayoutParams(Math.max(dp(20), size - dp(12)), Math.max(dp(20), size - dp(12)), Gravity.CENTER);
         orb.addView(ring, ringParams);
+        FrameLayout ring2 = new FrameLayout(this);
+        ring2.setBackground(roundStroke(Color.TRANSPARENT, 100, Color.argb(75, 255, 115, 72)));
+        FrameLayout.LayoutParams ring2Params = new FrameLayout.LayoutParams(Math.max(dp(18), size - dp(28)), Math.max(dp(18), size - dp(28)), Gravity.CENTER);
+        orb.addView(ring2, ring2Params);
         ImageView sparkle = new ImageView(this);
         sparkle.setImageResource(R.drawable.ic_ai_sparkle);
         sparkle.setColorFilter(Color.argb(230, 255, 255, 255));
@@ -675,6 +682,10 @@ public final class AiActivity extends Activity {
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas); canvas.drawColor(Color.rgb(7, 9, 17));
             float w=getWidth(), h=getHeight();
+            paint.setShader(new android.graphics.RadialGradient(w * .5f, h * .30f, Math.max(w, h) * .42f,
+                    Color.argb(105, 104, 18, 28), Color.TRANSPARENT, Shader.TileMode.CLAMP));
+            canvas.drawCircle(w * .5f, h * .30f, Math.max(w, h) * .42f, paint);
+            paint.setShader(null);
             paint.setStyle(Paint.Style.STROKE); paint.setColor(Color.argb(34,255,102,82));
             for (int i=0;i<points.length-1;i++) canvas.drawLine(points[i][0]*w,points[i][1]*h,points[i+1][0]*w,points[i+1][1]*h,paint);
             paint.setStyle(Paint.Style.FILL);
@@ -695,6 +706,32 @@ public final class AiActivity extends Activity {
         TextView v = new TextView(this); v.setText(text); v.setTextSize(size); v.setTextColor(color);
         if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return v;
+    }
+    private FrameLayout crystalField(String iconText, String fieldLabel, boolean password) {
+        FrameLayout box = new FrameLayout(this);
+        box.setPadding(dp(10), dp(4), dp(password ? 48 : 10), dp(2));
+        box.setBackground(roundStroke(Color.argb(52, 28, 29, 38), 19, Color.argb(75, 255, 255, 255)));
+        TextView icon = label(iconText, 18, true, password ? Color.rgb(148, 153, 170) : Color.rgb(255, 77, 103));
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(roundStroke(Color.argb(35, 255, 255, 255), 30, Color.argb(75, 255, 255, 255)));
+        box.addView(icon, new FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER_VERTICAL | Gravity.START));
+        TextView caption = label(fieldLabel, 10, true, password ? Color.rgb(148, 153, 170) : Color.rgb(255, 77, 103));
+        FrameLayout.LayoutParams captionParams = new FrameLayout.LayoutParams(-1, dp(18));
+        captionParams.leftMargin = dp(48); captionParams.topMargin = dp(4);
+        box.addView(caption, captionParams);
+        EditText value = edit("", password ? InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD : InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        value.setHint(""); value.setSingleLine(true); value.setTextSize(15); value.setPadding(0, 0, 0, 0); value.setBackgroundColor(Color.TRANSPARENT);
+        FrameLayout.LayoutParams valueParams = new FrameLayout.LayoutParams(-1, dp(28));
+        valueParams.leftMargin = dp(48); valueParams.topMargin = dp(25);
+        box.addView(value, valueParams);
+        if (password) {
+            TextView eye = label("◉", 17, false, Color.rgb(160, 166, 183)); eye.setGravity(Gravity.CENTER); eye.setContentDescription("Ver u ocultar contraseña");
+            eye.setOnClickListener(v -> { boolean visible = (value.getInputType() & InputType.TYPE_TEXT_VARIATION_PASSWORD) == 0; value.setInputType(InputType.TYPE_CLASS_TEXT | (visible ? InputType.TYPE_TEXT_VARIATION_PASSWORD : InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)); value.setSelection(value.length()); eye.setText(visible ? "◉" : "⊘"); });
+            box.addView(eye, new FrameLayout.LayoutParams(dp(38), dp(38), Gravity.END | Gravity.CENTER_VERTICAL));
+        }
+        box.setTag(value);
+        value.setOnFocusChangeListener((v, focused) -> box.setBackground(roundStroke(Color.argb(60, 36, 30, 42), 19, focused ? Color.rgb(255, 98, 82) : Color.argb(75, 255, 255, 255))));
+        return box;
     }
     private EditText edit(String hint, int inputType) {
         EditText v = new EditText(this); v.setSingleLine(false); v.setHint(hint); v.setTextColor(Color.WHITE);
