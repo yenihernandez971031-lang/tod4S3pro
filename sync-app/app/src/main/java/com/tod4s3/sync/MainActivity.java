@@ -533,8 +533,9 @@ public final class MainActivity extends ComponentActivity {
         new Thread(() -> {
             HttpURLConnection connection = null;
             try {
-                String manifestEntryUrl = prefs.getString(PREF_UPDATE_MANIFEST_URL, UPDATE_MANIFEST_URL);
-                if (!isAllowedUpdateUrl(manifestEntryUrl)) manifestEntryUrl = UPDATE_MANIFEST_URL;
+                // No reutilizar una URL antigua guardada por versiones previas: el manifiesto
+                // canónico del proyecto actual debe ser siempre la primera consulta.
+                String manifestEntryUrl = UPDATE_MANIFEST_URL;
                 connection = openUpdateManifestConnection(manifestEntryUrl);
                 if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return;
                 JSONObject manifest = new JSONObject(readUpdateManifest(connection.getInputStream()));
