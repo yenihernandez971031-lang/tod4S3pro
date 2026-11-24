@@ -118,7 +118,7 @@ public final class AiActivity extends Activity {
         stage.addView(new ConstellationView(this), new FrameLayout.LayoutParams(-1, -1));
         LinearLayout content = column();
         content.setGravity(Gravity.CENTER_HORIZONTAL);
-        content.setPadding(dp(24), dp(22), dp(24), dp(18));
+        content.setPadding(dp(14), dp(22), dp(14), dp(18));
         LinearLayout online = new LinearLayout(this);
         online.setGravity(Gravity.CENTER); online.setPadding(dp(10), dp(5), dp(10), dp(5));
         online.setBackground(roundStroke(Color.argb(35, 82, 235, 151), 18, Color.argb(140, 82, 235, 151)));
