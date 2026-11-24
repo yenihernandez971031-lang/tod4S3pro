@@ -1710,10 +1710,10 @@ public final class MainActivity extends ComponentActivity {
 
         page.addView(text("Planes Premium", 19, true), margin(0, 2, 0, 3));
         page.addView(bodyText("Descargas ilimitadas y AiTod4S3 mientras el plan esté activo."), margin(0, 0, 0, 9));
-        page.addView(bodyText("Premium también incluye cola prioritaria, reintentos automáticos, hasta 3 descargas en paralelo y herramientas multimedia desde el bot: subtítulos SRT, corte/unión de videos y conversión de imágenes por lotes."), margin(0, 0, 0, 9));
-        page.addView(planOffer("Premium 15 días", "250 CUP", "Descargas sin límite · 3 en paralelo · herramientas multimedia · AiTod4S3.", "Premium 15 días · 250 CUP"), margin(0, 0, 0, 8));
-        page.addView(planOffer("Premium 20 días", "300 CUP", "Descargas sin límite · cola prioritaria · herramientas multimedia · AiTod4S3.", "Premium 20 días · 300 CUP"), margin(0, 0, 0, 8));
-        page.addView(planOffer("Premium 30 días", "500 CUP", "Descargas sin límite · reintentos automáticos · herramientas multimedia · AiTod4S3.", "Premium 30 días · 500 CUP"), margin(0, 0, 0, 8));
+        page.addView(bodyText("Premium también incluye cola prioritaria, reintentos automáticos y hasta 3 descargas en paralelo."), margin(0, 0, 0, 9));
+        page.addView(planOffer("Premium 15 días", "250 CUP", "Descargas sin límite · 3 en paralelo · AiTod4S3.", "Premium 15 días · 250 CUP"), margin(0, 0, 0, 8));
+        page.addView(planOffer("Premium 20 días", "300 CUP", "Descargas sin límite · cola prioritaria · AiTod4S3.", "Premium 20 días · 300 CUP"), margin(0, 0, 0, 8));
+        page.addView(planOffer("Premium 30 días", "500 CUP", "Descargas sin límite · reintentos automáticos · AiTod4S3.", "Premium 30 días · 500 CUP"), margin(0, 0, 0, 8));
         page.addView(bodyText("Vendedores: @Niku_Blade · @fefefelix"), margin(0, 2, 0, 4));
         LinearLayout paymentMethods = new LinearLayout(this);
         paymentMethods.setOrientation(LinearLayout.HORIZONTAL);
@@ -2330,10 +2330,7 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void showDashboard(String filter, boolean animated) {
-        if ("tools".equals(filter)) {
-            showToolsStep(animated);
-            return;
-        }
+        if ("tools".equals(filter)) filter = "all";
         boolean alreadyOnDashboard = viewingDashboard && currentPage != null && dashboardItemsBox != null;
         showingPlansPage = false;
         viewingDashboard = true;
@@ -2495,8 +2492,6 @@ public final class MainActivity extends ComponentActivity {
                 () -> showDashboard("all", true), 1f);
         addTextTab(tabs, "Descargas", "completed".equals(dashboardFilter),
                 () -> showDashboard("completed", true), 1f);
-        addTextTab(tabs, "Herramientas", "tools".equals(dashboardFilter),
-                () -> showDashboard("tools", true), 1f);
         return tabs;
     }
 
