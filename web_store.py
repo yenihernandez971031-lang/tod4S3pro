@@ -733,17 +733,22 @@ def delete_delivery_for_token(token: str, task_id: str) -> tuple[dict, int]:
     task_id = task_id.strip()
     row = sync_api.delivery_for_user(user_id, task_id)
     if row is None:
-        if sync_api.has_delivery_without_task_id(user_id):
-            return {"ok": False, "error": "legacy_delivery_incomplete",
-                    "message": "Hay una entrega antigua sin task_id; no se intentó borrar ninguna parte."}, 409
         return {"ok": False, "error": "delivery_not_found"}, 404
     if row.get("source", "tod4s3_bot") != "tod4s3_bot":
         return {"ok": False, "error": "delivery_source_not_supported",
                 "message": "Esta entrega no fue creada por el bot y no se puede borrar desde aquí."}, 409
     parts = row.get("parts")
-    if row.get("task_id") != task_id or not isinstance(parts, list) or not parts:
+    is_legacy = not isinstance(row.get("task_id"), str) or not row.get("task_id", "").strip()
+    if not is_legacy and row.get("task_id") != task_id:
         return {"ok": False, "error": "legacy_delivery_incomplete",
                 "message": "La entrega no contiene un task_id o partes válidas; no se intentó borrar."}, 409
+    if not isinstance(parts, list) or not parts:
+        return {"ok": False, "error": "legacy_delivery_incomplete",
+                "message": "La entrega no contiene partes válidas; no se intentó borrar."}, 409
+    if is_legacy:
+        if not sync_api.remove_delivery_by_identifier(user_id, task_id, row):
+            return {"ok": False, "error": "delivery_changed"}, 409
+        return {"ok": True, "task_id": task_id, "deleted_parts": 0, "legacy_removed": True}, 200
     if not _delivery_cloud_deletable(row, user_id):
         if _delivery_todus_deletable(row):
             return _dispatch_app_task(token, "delete_delivery", {"task_id": task_id})
@@ -889,6 +894,8 @@ class StoreHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": False, "error": "unauthorized"}, 401)
             else:
                 for row in deliveries:
+                    if not isinstance(row.get("task_id"), str) or not row.get("task_id").strip():
+                        row["task_id"] = sync_api.legacy_delivery_id(row)
                     row["cloud_deletable"] = _delivery_cloud_deletable(row, user_id)
                     row["todus_deletable"] = _delivery_todus_deletable(row)
                 self._json_response({"ok": True, "deliveries": deliveries})
@@ -898,6 +905,15 @@ class StoreHandler(SimpleHTTPRequestHandler):
             token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
             payload, status = _dispatch_app_task(token, "list", {})
             self._json_response(payload, status)
+            return
+        if path == "/api/app/announcements":
+            authorization = self.headers.get("Authorization", "")
+            token = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+            identity, error, status = _authorize_app_token(token)
+            if error:
+                self._json_response(error, status)
+                return
+            self._json_response({"ok": True, "announcements": sync_api.app_announcements_for_user(identity["user_id"])})
             return
         if path == "/api/site-stats":
             visitor = parse_qs(parsed.query).get("visitor", [""])[0][:96]
@@ -962,6 +978,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
             "/api/app/premium/claim", "/api/app/support", "/api/app/ai/chat",
             "/api/app/nikudaria/agent",
             "/api/app/update-decline", "/api/app/device-status", "/api/app/compress",
+            "/api/app/announcements/dismiss", "/api/app/announcements/respond",
             "/api/ai/login", "/api/ai/logout", "/api/ai/chat",
         }:
             self._json_response({"ok": False, "error": "not_found"}, 404)
@@ -1037,6 +1054,30 @@ class StoreHandler(SimpleHTTPRequestHandler):
             return
         token = self.headers.get("Authorization", "")
         token = token[7:].strip() if token.lower().startswith("bearer ") else ""
+        if parsed.path in {"/api/app/announcements/dismiss", "/api/app/announcements/respond"}:
+            identity, error, status = _authorize_app_token(token)
+            if error:
+                self._json_response(error, status)
+                return
+            announcement_id = body.get("announcement_id")
+            if not isinstance(announcement_id, str) or not re.fullmatch(r"apk_[A-Za-z0-9_-]{8,40}", announcement_id):
+                self._json_response({"ok": False, "error": "invalid_announcement_id"}, 400)
+                return
+            try:
+                if parsed.path.endswith("/dismiss"):
+                    changed = sync_api.dismiss_app_announcement(identity["user_id"], announcement_id)
+                    self._json_response({"ok": changed}, 200 if changed else 404)
+                else:
+                    option = body.get("option")
+                    if isinstance(option, bool) or not isinstance(option, int):
+                        raise ValueError("invalid_survey_option")
+                    result = sync_api.respond_app_announcement(identity["user_id"], announcement_id, option)
+                    self._json_response({"ok": True, **result})
+            except ValueError as exc:
+                reason = str(exc)
+                status_code = 409 if reason in {"announcement_expired", "announcement_not_found"} else 400
+                self._json_response({"ok": False, "error": reason}, status_code)
+            return
         if parsed.path == "/api/ai/logout":
             try:
                 revoked = ai_auth.revoke_session(token)

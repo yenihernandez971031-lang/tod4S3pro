@@ -24,7 +24,7 @@ def _default_state() -> dict[str, Any]:
     return {"pairings": {}, "tokens": {}, "deliveries": {}, "premium_activations": {},
             "app_bans": {"users": {}, "devices": {}}, "app_ban_history": [],
             "app_support_messages": [], "app_update_rejections": {"counters": {}, "requests": {}},
-            "app_update_bans": []}
+            "app_update_bans": [], "app_announcements": []}
 
 
 def _read() -> dict[str, Any]:
@@ -53,6 +53,112 @@ def _write(state: dict[str, Any]) -> None:
             os.unlink(tmp_name)
         except FileNotFoundError:
             pass
+
+
+def _announcement_copy(item: dict[str, Any], user_id: int) -> dict[str, Any]:
+    responses = item.get("responses", {}) if isinstance(item.get("responses"), dict) else {}
+    dismissed = item.get("dismissed_by", {}) if isinstance(item.get("dismissed_by"), dict) else {}
+    response = responses.get(str(int(user_id)))
+    return {
+        "id": str(item.get("id", "")), "title": str(item.get("title", "")),
+        "body": str(item.get("body", "")), "icon": str(item.get("icon", "📢")),
+        "action_label": str(item.get("action_label", "")), "action_url": str(item.get("action_url", "")),
+        "survey": copy.deepcopy(item.get("survey")) if isinstance(item.get("survey"), dict) else None,
+        "created_at": int(item.get("created_at", 0) or 0), "expires_at": int(item.get("expires_at", 0) or 0),
+        "dismissed": str(int(user_id)) in dismissed, "responded": isinstance(response, dict),
+        "selected_option": response.get("option") if isinstance(response, dict) else None,
+    }
+
+
+def create_app_announcement(title: str, body: str, icon: str = "📢",
+                            action_label: str = "", action_url: str = "",
+                            survey_question: str = "", survey_options: list[str] | None = None,
+                            expires_at: int = 0) -> dict[str, Any]:
+    """Crea un anuncio APK acotado y persistente desde el panel administrativo."""
+    title, body, icon = str(title or "").strip(), str(body or "").strip(), str(icon or "📢").strip()
+    action_label, action_url = str(action_label or "").strip(), str(action_url or "").strip()
+    question = str(survey_question or "").strip()
+    options = [str(value).strip() for value in (survey_options or []) if str(value).strip()]
+    if not 1 <= len(title) <= 80 or not 1 <= len(body) <= 1200:
+        raise ValueError("invalid_announcement_text")
+    if len(icon) > 8 or len(action_label) > 48 or len(action_url) > 2048:
+        raise ValueError("invalid_announcement_fields")
+    if action_url and not re.fullmatch(r"https?://[^\s<>]+", action_url, re.IGNORECASE):
+        raise ValueError("invalid_announcement_url")
+    if question or options:
+        if not 1 <= len(question) <= 180 or not 2 <= len(options) <= 6:
+            raise ValueError("invalid_announcement_survey")
+        if any(len(option) > 80 for option in options) or len(set(options)) != len(options):
+            raise ValueError("invalid_announcement_survey")
+    else:
+        question, options = "", []
+    expires_at = int(expires_at or 0)
+    now = int(time.time())
+    if expires_at and expires_at <= now:
+        raise ValueError("invalid_announcement_expiry")
+    item = {"id": "apk_" + secrets.token_urlsafe(9), "title": title, "body": body,
+            "icon": icon or "📢", "action_label": action_label, "action_url": action_url,
+            "survey": {"question": question, "options": options} if options else None,
+            "created_at": now, "expires_at": expires_at, "dismissed_by": {}, "responses": {}}
+    with _LOCK:
+        state = _read()
+        rows = state.get("app_announcements", [])
+        if not isinstance(rows, list):
+            rows = []
+        state["app_announcements"] = [row for row in rows if isinstance(row, dict)][-49:] + [item]
+        _write(state)
+    return _announcement_copy(item, 0)
+
+
+def app_announcements_for_user(user_id: int) -> list[dict[str, Any]]:
+    now = int(time.time())
+    with _LOCK:
+        rows = _read().get("app_announcements", [])
+        if not isinstance(rows, list):
+            return []
+        result = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            expiry = int(row.get("expires_at", 0) or 0)
+            dismissed = row.get("dismissed_by", {}) if isinstance(row.get("dismissed_by"), dict) else {}
+            if (not expiry or expiry > now) and str(int(user_id)) not in dismissed:
+                result.append(_announcement_copy(row, user_id))
+        return result
+
+
+def dismiss_app_announcement(user_id: int, announcement_id: str) -> bool:
+    with _LOCK:
+        state = _read()
+        for row in state.get("app_announcements", []):
+            if isinstance(row, dict) and row.get("id") == announcement_id:
+                row.setdefault("dismissed_by", {})[str(int(user_id))] = int(time.time())
+                _write(state)
+                return True
+        return False
+
+
+def respond_app_announcement(user_id: int, announcement_id: str, option: int) -> dict[str, Any]:
+    with _LOCK:
+        state = _read()
+        now = int(time.time())
+        for row in state.get("app_announcements", []):
+            if not isinstance(row, dict) or row.get("id") != announcement_id:
+                continue
+            if row.get("expires_at") and int(row.get("expires_at")) <= now:
+                raise ValueError("announcement_expired")
+            survey = row.get("survey") if isinstance(row.get("survey"), dict) else None
+            options = survey.get("options", []) if survey else []
+            if not isinstance(option, int) or isinstance(option, bool) or option < 0 or option >= len(options):
+                raise ValueError("invalid_survey_option")
+            responses = row.setdefault("responses", {})
+            key = str(int(user_id))
+            if key in responses:
+                return {"responded": True, "option": int(responses[key].get("option", -1))}
+            responses[key] = {"option": option, "responded_at": now}
+            _write(state)
+            return {"responded": True, "option": option}
+        raise ValueError("announcement_not_found")
 
 
 def create_pairing_code(user_id: int) -> str:
@@ -424,9 +530,42 @@ def delivery_for_user(user_id: int, task_id: str) -> dict[str, Any] | None:
         if not isinstance(rows, list):
             return None
         for row in rows:
-            if isinstance(row, dict) and row.get("task_id") == task_id:
+            if isinstance(row, dict) and (row.get("task_id") == task_id or
+                    (not row.get("task_id") and legacy_delivery_id(row) == task_id)):
                 return dict(row)
     return None
+
+
+def legacy_delivery_id(row: dict[str, Any]) -> str:
+    """Identificador estable para una entrega creada antes de guardar task_id."""
+    material = json.dumps({"filename": row.get("filename", ""), "created_at": row.get("created_at", 0),
+                           "parts": row.get("parts", [])}, ensure_ascii=False, sort_keys=True)
+    return "legacy_" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+
+def remove_delivery_by_identifier(user_id: int, identifier: str, expected_row: dict[str, Any]) -> bool:
+    """Retira una entrega actual o antigua verificando que no haya cambiado."""
+    with _LOCK:
+        state = _read()
+        key = str(int(user_id))
+        rows = state["deliveries"].get(key, [])
+        if not isinstance(rows, list):
+            return False
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                continue
+            current_id = row.get("task_id") or legacy_delivery_id(row)
+            if current_id == identifier:
+                if row != expected_row:
+                    return False
+                del rows[index]
+                if rows:
+                    state["deliveries"][key] = rows
+                else:
+                    state["deliveries"].pop(key, None)
+                _write(state)
+                return True
+        return False
 
 
 def has_delivery_without_task_id(user_id: int) -> bool:

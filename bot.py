@@ -1079,6 +1079,36 @@ def broadcast_destination_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def apk_announcement_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[btn("Cancelar", callback_data="admin:apk_announcement:cancel")]])
+
+
+def apk_survey_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("Sí, añadir encuesta", callback_data="admin:apk_survey:yes")],
+        [btn("No, publicar sin encuesta", callback_data="admin:apk_survey:no")],
+        [btn("Cancelar", callback_data="admin:apk_announcement:cancel")],
+    ])
+
+
+def apk_announcement_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [btn("Publicar anuncio APK", callback_data="admin:apk_announcement:send")],
+        [btn("Cancelar", callback_data="admin:apk_announcement:cancel")],
+    ])
+
+
+def apk_announcement_preview(state: dict) -> str:
+    lines = [f"{state.get('icon', '📢')} {state.get('title', '')}", "", str(state.get("body", ""))]
+    if state.get("action_url"):
+        lines.extend(["", f"🔗 {state.get('action_label') or 'Abrir enlace'}: {state['action_url']}"])
+    options = state.get("survey_options") or []
+    if options:
+        lines.extend(["", f"🗳️ {state.get('survey_question', '')}"])
+        lines.extend(f"{index + 1}. {option}" for index, option in enumerate(options))
+    return "📱 VISTA PREVIA DEL ANUNCIO APK\n\n" + "\n".join(lines)
+
+
 GLOBAL_BROADCAST_CHANNEL = "@Dark_Zone_666"
 
 
@@ -3357,6 +3387,7 @@ def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
         ],
         "comms": [
             [btn("📢 ᴅɪꜰᴜꜱɪóɴ", callback_data="admin:broadcast")],
+            [btn("📱 Anuncio APK", callback_data="admin:apk_announcement:start")],
             [btn("📖 ᴛᴜᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴏ", callback_data="admin:tutorial")],
         ],
         "ai": [
@@ -5915,6 +5946,53 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
+    if query.data.startswith("admin:apk_announcement:") or query.data.startswith("admin:apk_survey:"):
+        if not is_owner(user.id) or not update.effective_chat or update.effective_chat.type != "private":
+            await query.answer(sc("Acción solo para el administrador"), show_alert=True)
+            return
+        action = query.data.rsplit(":", 1)[-1]
+        state = context.user_data.get("admin_state")
+        if action == "start":
+            context.user_data["admin_state"] = {"step": "apk_title"}
+            await query.answer()
+            await edit_query_message_text(query.message, card("📱 ᴀɴᴜɴᴄɪᴏ ᴀᴘᴋ", [
+                "Este anuncio aparecerá arriba en la aplicación Tod4S3 Sync.",
+                "", "Escribe el título (máximo 80 caracteres).",
+            ]), reply_markup=apk_announcement_cancel_keyboard())
+            return
+        if action == "cancel":
+            context.user_data.pop("admin_state", None)
+            await query.answer()
+            await edit_query_message_text(query.message, card("❌ ᴀɴᴜɴᴄɪᴏ ᴄᴀɴᴄᴇʟᴀᴅᴏ", ["No se publicó ningún anuncio APK."]),
+                                          reply_markup=InlineKeyboardMarkup([[btn("Volver a Comunicación", callback_data="admin:menu:comms")]]))
+            return
+        if action in {"yes", "no"} and isinstance(state, dict) and state.get("step") == "apk_survey_choice":
+            state["step"] = "apk_survey_question" if action == "yes" else "apk_confirm"
+            context.user_data["admin_state"] = state
+            await query.answer()
+            if action == "yes":
+                await edit_query_message_text(query.message, card("🗳️ ᴇɴᴄᴜᴇꜱᴛᴀ", ["Escribe la pregunta de la encuesta (máximo 180 caracteres)."]), reply_markup=apk_announcement_cancel_keyboard())
+            else:
+                await edit_query_message_text(query.message, apk_announcement_preview(state), parse_mode=None, reply_markup=apk_announcement_confirmation_keyboard())
+            return
+        if action == "send" and isinstance(state, dict) and state.get("step") == "apk_confirm":
+            try:
+                created = sync_api.create_app_announcement(
+                    state.get("title", ""), state.get("body", ""), state.get("icon", "📢"),
+                    state.get("action_label", ""), state.get("action_url", ""),
+                    state.get("survey_question", ""), state.get("survey_options", []),
+                )
+            except (TypeError, ValueError) as exc:
+                await query.answer(sc("No se pudo publicar: " + str(exc)), show_alert=True)
+                return
+            context.user_data.pop("admin_state", None)
+            await query.answer(sc("Anuncio APK publicado"))
+            await edit_query_message_text(query.message, card("✅ ᴀɴᴜɴᴄɪᴏ ᴀᴘᴋ ᴘᴜʙʟɪᴄᴀᴅᴏ", [
+                "Ya está disponible arriba en la aplicación.", f"ID: {created['id']}",
+            ]), reply_markup=InlineKeyboardMarkup([[btn("Volver a Comunicación", callback_data="admin:menu:comms")]]))
+            return
+        await query.answer(sc("Completa primero el paso actual"), show_alert=True)
+        return
     if query.data.startswith("admin:broadcast:"):
         chat = update.effective_chat
         if not is_owner(user.id) or not chat or chat.type != "private":
@@ -7998,6 +8076,68 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 admin_role_text(target_id),
                 reply_markup=admin_role_keyboard(target_id),
             )
+            return
+
+        if step == "apk_title":
+            value = text.strip()
+            if not 1 <= len(value) <= 80:
+                await message.reply_text(sc("El título debe tener entre 1 y 80 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
+                return
+            admin_state.update({"step": "apk_body", "title": value})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(sc("Escribe el texto del anuncio (máximo 1200 caracteres)."), reply_markup=apk_announcement_cancel_keyboard())
+            return
+
+        if step == "apk_body":
+            value = text.strip()
+            if not 1 <= len(value) <= 1200:
+                await message.reply_text(sc("El texto debe tener entre 1 y 1200 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
+                return
+            admin_state.update({"step": "apk_icon", "body": value})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(sc("Envía un emoji para el icono del anuncio o escribe - para usar 📢."), reply_markup=apk_announcement_cancel_keyboard())
+            return
+
+        if step == "apk_icon":
+            icon = text.strip()
+            admin_state.update({"step": "apk_action_url", "icon": "📢" if icon == "-" else icon[:8]})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(sc("Envía un enlace https:// opcional para el botón, o escribe - para continuar sin botón."), reply_markup=apk_announcement_cancel_keyboard())
+            return
+
+        if step == "apk_action_url":
+            value = text.strip()
+            if value != "-" and not valid_broadcast_button_url(value):
+                await message.reply_text(sc("Envía una URL http:// o https:// válida, o escribe -."), reply_markup=apk_announcement_cancel_keyboard())
+                return
+            admin_state.update({"step": "apk_survey_choice", "action_url": "" if value == "-" else value,
+                                "action_label": "Abrir enlace" if value != "-" else ""})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(sc("¿Quieres incluir una encuesta en este anuncio?"), reply_markup=apk_survey_choice_keyboard())
+            return
+
+        if step == "apk_survey_question":
+            value = text.strip()
+            if not 1 <= len(value) <= 180:
+                await message.reply_text(sc("La pregunta debe tener entre 1 y 180 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
+                return
+            admin_state.update({"step": "apk_survey_options", "survey_question": value})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(sc("Escribe entre 2 y 6 opciones separadas por comas (máximo 80 caracteres cada una)."), reply_markup=apk_announcement_cancel_keyboard())
+            return
+
+        if step == "apk_survey_options":
+            options = [item.strip() for item in text.split(",") if item.strip()]
+            if not 2 <= len(options) <= 6 or len(set(options)) != len(options) or any(len(item) > 80 for item in options):
+                await message.reply_text(sc("Necesito entre 2 y 6 opciones diferentes, separadas por comas."), reply_markup=apk_announcement_cancel_keyboard())
+                return
+            admin_state.update({"step": "apk_confirm", "survey_options": options})
+            context.user_data["admin_state"] = admin_state
+            await message.reply_text(apk_announcement_preview(admin_state), parse_mode=None, reply_markup=apk_announcement_confirmation_keyboard())
+            return
+
+        if step == "apk_confirm":
+            await message.reply_text(sc("Revisa la vista previa y pulsa «Publicar anuncio APK»."), reply_markup=apk_announcement_confirmation_keyboard())
             return
 
         if step == "broadcast_text":

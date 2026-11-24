@@ -179,6 +179,7 @@ public final class MainActivity extends ComponentActivity {
             } else {
                 refreshDeliveries();
                 refreshAppTasks();
+                refreshAnnouncements();
                 refreshAccountProfile();
             }
             handler.postDelayed(this, 10_000L);
@@ -200,6 +201,7 @@ public final class MainActivity extends ComponentActivity {
     private String todusSessionStatusMessage = "No hay una sesión ToDus guardada.";
     private TextView planStatus;
     private LinearLayout dashboardPlanCard;
+    private LinearLayout apkAnnouncementsBox;
     private TextView dashboardPlanStatusText;
     private LinearLayout freeQuotaPanel;
     private ProgressBar freeQuotaPanelProgress;
@@ -209,6 +211,8 @@ public final class MainActivity extends ComponentActivity {
     private LinearLayout deliveriesBox;
     private LinearLayout dashboardItemsBox;
     private TextView dashboardStatusText;
+    private JSONArray latestAnnouncements = new JSONArray();
+    private boolean announcementsRefreshInFlight;
     private TextView activeDownloadBadge;
     private int activeDownloadBadgeCount;
     private LinearLayout quotaUsageBox;
@@ -2368,6 +2372,10 @@ public final class MainActivity extends ComponentActivity {
         page.addView(dashboardToolbar(), margin(0, 0, 0, 0));
         dashboardPlanCard = buildDashboardPlanCard();
         page.addView(dashboardPlanCard, margin(0, 10, 0, 0));
+        apkAnnouncementsBox = new LinearLayout(this);
+        apkAnnouncementsBox.setOrientation(LinearLayout.VERTICAL);
+        page.addView(apkAnnouncementsBox, margin(0, 10, 0, 0));
+        renderAnnouncements();
         page.addView(dashboardTabs(), margin(0, 12, 0, 0));
         View tabDivider = new View(this);
         tabDivider.setBackgroundColor(borderColor());
@@ -2387,6 +2395,7 @@ public final class MainActivity extends ComponentActivity {
             handler.postDelayed(() -> {
                 refreshDeliveries();
                 refreshAppTasks();
+                refreshAnnouncements();
                 refreshAccountProfile();
             }, animated ? 260L : 0L);
         }
@@ -7075,6 +7084,119 @@ public final class MainActivity extends ComponentActivity {
         todusPassword = "";
         todusToken = "";
         setToDusSessionStatus("Sesión ToDus desconectada.");
+    }
+
+    private void renderAnnouncements() {
+        if (apkAnnouncementsBox == null) return;
+        apkAnnouncementsBox.removeAllViews();
+        for (int i = 0; i < latestAnnouncements.length(); i++) {
+            JSONObject announcement = latestAnnouncements.optJSONObject(i);
+            if (announcement != null) apkAnnouncementsBox.addView(buildAnnouncementCard(announcement), margin(0, 0, 0, 9));
+        }
+        apkAnnouncementsBox.setVisibility(latestAnnouncements.length() == 0 ? View.GONE : View.VISIBLE);
+    }
+
+    private LinearLayout buildAnnouncementCard(JSONObject announcement) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(15), dp(13), dp(13), dp(14));
+        card.setBackground(roundRect(Color.argb(42, 68, 214, 200), 24, Color.argb(90, 68, 214, 200)));
+        card.setElevation(dp(2));
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView icon = text(announcement.optString("icon", "📢"), 25, false);
+        heading.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        TextView title = text(announcement.optString("title", "Aviso"), 17, true);
+        heading.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView close = text("×", 28, true);
+        close.setGravity(Gravity.CENTER);
+        close.setTextColor(accentColor());
+        heading.addView(close, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        card.addView(heading);
+        close.setOnClickListener(v -> dismissAnnouncement(announcement.optString("id", ""), card));
+        TextView body = bodyText(announcement.optString("body", ""));
+        body.setTextSize(14);
+        body.setPadding(dp(42), dp(2), dp(4), dp(8));
+        card.addView(body);
+        String actionUrl = announcement.optString("action_url", "");
+        if (!actionUrl.isEmpty()) {
+            Button action = new Button(this);
+            action.setText(announcement.optString("action_label", "Abrir enlace"));
+            action.setTextColor(Color.WHITE);
+            action.setAllCaps(false);
+            action.setBackground(roundRect(accentColor(), 18, accentColor()));
+            action.setOnClickListener(v -> startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(actionUrl))));
+            card.addView(action, margin(42, 0, 4, 8));
+        }
+        JSONObject survey = announcement.optJSONObject("survey");
+        JSONArray options = survey == null ? null : survey.optJSONArray("options");
+        if (survey != null && options != null && options.length() > 1 && !announcement.optBoolean("responded", false)) {
+            TextView question = text(survey.optString("question", "Encuesta"), 14, true);
+            question.setPadding(dp(42), dp(3), dp(3), dp(2));
+            card.addView(question);
+            RadioGroup group = new RadioGroup(this);
+            group.setPadding(dp(42), 0, 0, 0);
+            for (int i = 0; i < options.length(); i++) {
+                RadioButton option = new RadioButton(this);
+                option.setText(options.optString(i));
+                option.setTextColor(primaryTextColor());
+                option.setTag(i);
+                group.addView(option);
+            }
+            card.addView(group);
+            Button send = new Button(this);
+            send.setText("Enviar respuesta");
+            send.setAllCaps(false);
+            send.setTextColor(Color.WHITE);
+            send.setBackground(roundRect(accentColor(), 18, accentColor()));
+            send.setOnClickListener(v -> {
+                int checked = group.getCheckedRadioButtonId();
+                if (checked == -1) { Toast.makeText(this, "Selecciona una opción.", Toast.LENGTH_SHORT).show(); return; }
+                View selected = group.findViewById(checked);
+                submitAnnouncementResponse(announcement.optString("id", ""), (Integer) selected.getTag());
+            });
+            card.addView(send, margin(42, 5, 4, 0));
+        } else if (announcement.optBoolean("responded", false)) {
+            TextView answered = text("✓ Respuesta registrada", 13, true);
+            answered.setTextColor(accentColor());
+            answered.setPadding(dp(42), dp(5), 0, 0);
+            card.addView(answered);
+        }
+        card.setAlpha(0f);
+        card.animate().alpha(1f).setDuration(360L).setInterpolator(new DecelerateInterpolator()).start();
+        return card;
+    }
+
+    private void refreshAnnouncements() {
+        final String current = token;
+        if (appBanned || current == null || current.isEmpty() || announcementsRefreshInFlight) return;
+        announcementsRefreshInFlight = true;
+        new Thread(() -> {
+            try {
+                JSONObject result = request("GET", "/api/app/announcements", "", current);
+                JSONArray rows = result.optJSONArray("announcements");
+                runOnUiThread(() -> { announcementsRefreshInFlight = false; latestAnnouncements = rows == null ? new JSONArray() : rows; renderAnnouncements(); });
+            } catch (Exception ignored) { runOnUiThread(() -> announcementsRefreshInFlight = false); }
+        }, "announcement-refresh").start();
+    }
+
+    private void dismissAnnouncement(String id, View card) {
+        if (id == null || id.isEmpty()) return;
+        card.setEnabled(false);
+        new Thread(() -> {
+            try { request("POST", "/api/app/announcements/dismiss", new JSONObject().put("announcement_id", id).toString(), token); }
+            catch (Exception ignored) { }
+            runOnUiThread(() -> card.animate().alpha(0f).setDuration(220L).withEndAction(this::refreshAnnouncements).start());
+        }, "announcement-dismiss").start();
+    }
+
+    private void submitAnnouncementResponse(String id, int option) {
+        new Thread(() -> {
+            try {
+                request("POST", "/api/app/announcements/respond", new JSONObject().put("announcement_id", id).put("option", option).toString(), token);
+                runOnUiThread(() -> { Toast.makeText(this, "Respuesta registrada.", Toast.LENGTH_SHORT).show(); refreshAnnouncements(); });
+            } catch (Exception ignored) { runOnUiThread(() -> Toast.makeText(this, "No se pudo registrar la respuesta.", Toast.LENGTH_SHORT).show()); }
+        }, "announcement-response").start();
     }
 
     private void refreshDeliveries() {

@@ -1,7 +1,7 @@
 {
-  "version_code": 134,
-  "version_name": "1.5.89",
+  "version_code": 135,
+  "version_name": "1.5.90",
   "manifest_url": "https://tod4s3pro-production.up.railway.app/android-update.json",
-  "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/Tod4S3-Sync-v1.5.89-signed.apk",
-  "sha256": "c04a373fd257f9fd20a673695fbc46afcc04155bb83c9cfa456fb2030fe4b25c"
+  "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/Tod4S3-Sync-v1.5.90-signed.apk",
+  "sha256": "420cd5fe56f98b269c6cbc5c040402f03b6a56aff9ba1316c55ef22edd4ee64b"
 }
