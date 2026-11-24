@@ -80,6 +80,7 @@ public final class AiActivity extends Activity {
     private Button loginButton;
     private ImageButton sendButton;
     private ImageButton callButton;
+    private TextView menuButton;
     private Switch speakSwitch;
     private SpeechRecognizer speechRecognizer;
     private Dialog voiceCallDialog;
@@ -88,9 +89,11 @@ public final class AiActivity extends Activity {
     private boolean voiceCallActive = false;
     private boolean voiceCallSpeaking = false;
     private long speechStartedAt;
+    private int voiceNoiseAttempts = 0;
     private boolean sending = false;
     private boolean ttsReady = false;
     private boolean micPermissionPending = false;
+    private boolean voiceCallPermissionPending = false;
     private TextToSpeech tts;
 
     @Override public void onCreate(Bundle state) {
@@ -224,10 +227,16 @@ public final class AiActivity extends Activity {
         chatStatus = label("en línea", 12, true, Color.rgb(53, 224, 140));
         identity.addView(chatStatus, lp(-1, -2));
         header.addView(identity, new LinearLayout.LayoutParams(0, -2, 1f));
-        callButton = iconButton(R.drawable.ic_mic, Color.WHITE, "Iniciar llamada de voz con AiTod4S3");
+        callButton = iconButton(R.drawable.ic_call_voice, Color.WHITE, "Iniciar llamada de voz con AiTod4S3");
         callButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
         callButton.setOnClickListener(v -> toggleVoiceCall());
         header.addView(callButton, lp(42, 42));
+        menuButton = label("⋮", 27, true, Color.WHITE);
+        menuButton.setGravity(Gravity.CENTER); menuButton.setContentDescription("Opciones del chat");
+        menuButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
+        menuButton.setOnClickListener(v -> showChatOptions(menuButton));
+        LinearLayout.LayoutParams menuParams = lp(42, 42); menuParams.setMargins(dp(7), 0, dp(7), 0);
+        header.addView(menuButton, menuParams);
         Button logout = button("SALIR", PANEL);
         logout.setTextSize(11);
         logout.setBackground(roundStroke(PANEL, 14, Color.rgb(78, 82, 98)));
@@ -295,6 +304,9 @@ public final class AiActivity extends Activity {
         composer.setOnEditorActionListener((view, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_SEND) { sendMessage(); return true; }
             return false;
+        });
+        composer.setOnFocusChangeListener((view, focused) -> {
+            if (focused) scroll.postDelayed(() -> scroll.fullScroll(View.FOCUS_DOWN), 180);
         });
         root.addView(page, new LinearLayout.LayoutParams(-1, 0, 1f));
     }
@@ -369,15 +381,43 @@ public final class AiActivity extends Activity {
     }
 
     private void launchRecognizer() {
-        try {
-            Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-CU");
-            intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla con AiTod4S3");
-            startActivityForResult(intent, 17);
-        } catch (Exception e) {
-            Toast.makeText(this, "No hay un servicio de reconocimiento de voz disponible.", Toast.LENGTH_LONG).show();
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            Toast.makeText(this, "No hay un servicio de reconocimiento de voz disponible.", Toast.LENGTH_LONG).show(); return;
         }
+        if (speechRecognizer == null) speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        speechRecognizer.cancel();
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle params) { if (chatStatus != null) chatStatus.setText("escuchando…"); }
+            @Override public void onBeginningOfSpeech() { speechStartedAt = SystemClock.uptimeMillis(); }
+            @Override public void onRmsChanged(float rms) { }
+            @Override public void onBufferReceived(byte[] buffer) { }
+            @Override public void onEndOfSpeech() { if (chatStatus != null) chatStatus.setText("procesando…"); }
+            @Override public void onError(int error) { if (chatStatus != null) chatStatus.setText("en línea"); }
+            @Override public void onResults(Bundle results) {
+                ArrayList<String> values = results == null ? null : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                String phrase = values == null || values.isEmpty() ? "" : values.get(0);
+                if (isUsableVoicePhrase(phrase, results) && composer != null) {
+                    composer.setText(phrase.trim()); composer.setSelection(composer.length());
+                }
+                if (chatStatus != null) chatStatus.setText("en línea");
+            }
+            @Override public void onPartialResults(Bundle partialResults) { }
+            @Override public void onEvent(int eventType, Bundle params) { }
+        });
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-CU");
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
+        intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla con AiTod4S3");
+        speechRecognizer.startListening(intent);
+    }
+
+    private boolean isUsableVoicePhrase(String phrase, Bundle results) {
+        if (phrase == null) return false;
+        String normalized = phrase.toLowerCase(Locale.ROOT).replaceAll("[^a-záéíóúüñ0-9 ]", " ").replaceAll("\\s+", " ").trim();
+        if (normalized.length() < 2 || normalized.matches("(?:eh|ah|ajá|mmm+|mm+|uh+|um+|hm+|hmm+|oh+|em+)")) return false;
+        if (results != null) { float[] confidence = results.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES); if (confidence != null && confidence.length > 0 && confidence[0] < .30f && normalized.length() < 8) return false; }
+        return true;
     }
 
     @Override public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
@@ -386,6 +426,10 @@ public final class AiActivity extends Activity {
             micPermissionPending = false;
             if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) launchRecognizer();
             else Toast.makeText(this, "Permite el micrófono para dictar; también puedes escribir.", Toast.LENGTH_LONG).show();
+        } else if (request == 18 && voiceCallPermissionPending) {
+            voiceCallPermissionPending = false;
+            if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) toggleVoiceCall();
+            else Toast.makeText(this, "Permite el micrófono para usar la llamada de voz.", Toast.LENGTH_LONG).show();
         }
     }
 
@@ -596,15 +640,38 @@ public final class AiActivity extends Activity {
         }
     }
 
+    private void showChatOptions(View anchor) {
+        LinearLayout panel = column(); panel.setPadding(dp(20), dp(16), dp(20), dp(12));
+        panel.setBackground(roundStroke(Color.rgb(18, 20, 28), 20, Color.rgb(78, 82, 98)));
+        TextView title = label("Opciones del chat", 18, true, Color.WHITE); panel.addView(title, margins(-1, -2, 0, 0, 0, 10));
+        TextView clear = label("Limpiar conversación", 14, true, Color.rgb(255, 145, 160)); clear.setGravity(Gravity.CENTER_VERTICAL);
+        clear.setPadding(dp(12), 0, dp(12), 0); clear.setBackground(roundStroke(Color.rgb(44, 26, 34), 14, Color.rgb(126, 54, 72)));
+        panel.addView(clear, lp(-1, 48));
+        TextView close = label("Cerrar", 13, true, Color.rgb(170, 176, 194)); close.setGravity(Gravity.CENTER);
+        panel.addView(close, margins(-1, 46, 0, 8, 0, 0));
+        Dialog dialog = new Dialog(this); dialog.setContentView(panel); dialog.setCancelable(true); dialog.show();
+        Window window = dialog.getWindow();
+        if (window != null) { window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT)); window.setLayout(Math.min(dp(330), getResources().getDisplayMetrics().widthPixels - dp(32)), WindowManager.LayoutParams.WRAP_CONTENT); }
+        clear.setOnClickListener(v -> { history.clear(); saveHistory(); renderEmptyChat(); dialog.dismiss(); });
+        close.setOnClickListener(v -> dialog.dismiss());
+    }
+
+    private void renderEmptyChat() {
+        if (transcript == null) return;
+        transcript.removeAllViews(); welcomePanel = null; addWelcomeState();
+    }
+
     private void toggleVoiceCall() {
         if (voiceCallActive) { stopVoiceCall(); return; }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            voiceCallPermissionPending = true;
             requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 18); return;
         }
         if (!SpeechRecognizer.isRecognitionAvailable(this)) {
             Toast.makeText(this, "El dictado de voz no está disponible en este teléfono.", Toast.LENGTH_LONG).show(); return;
         }
         voiceCallActive = true;
+        voiceNoiseAttempts = 0;
         if (callButton != null) callButton.setBackground(gradientRound(new int[]{RED, Color.rgb(193, 18, 46)}, 15));
         showVoiceCallDialog(); beginVoiceRecognition();
     }
@@ -619,13 +686,16 @@ public final class AiActivity extends Activity {
             @Override public void onRmsChanged(float rms) { }
             @Override public void onBufferReceived(byte[] buffer) { }
             @Override public void onEndOfSpeech() { setVoiceCallStatus("PROCESANDO…"); }
-            @Override public void onError(int error) { if (voiceCallActive && !sending) postDelayed(() -> beginVoiceRecognition(), 180); }
+            @Override public void onError(int error) {
+                if (voiceCallActive && !sending && voiceNoiseAttempts++ < 2) postDelayed(() -> beginVoiceRecognition(), 260);
+                else if (voiceCallActive) setVoiceCallStatus("NO SE DETECTÓ VOZ · HABLA DE NUEVO");
+            }
             @Override public void onResults(Bundle results) {
                 ArrayList<String> values = results == null ? null : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 String phrase = values == null || values.isEmpty() ? "" : values.get(0).trim();
                 long duration = speechStartedAt == 0 ? 1000 : SystemClock.uptimeMillis() - speechStartedAt;
-                if (phrase.length() >= 2 && (duration >= 180 || phrase.length() >= 5) && composer != null && voiceCallActive) {
-                    composer.setText(phrase); composer.setSelection(composer.length()); setVoiceCallStatus("CONECTANDO CON LA IA…"); sendMessage();
+                if (isUsableVoicePhrase(phrase, results) && (duration >= 180 || phrase.length() >= 5) && composer != null && voiceCallActive) {
+                    voiceNoiseAttempts = 0; composer.setText(phrase); composer.setSelection(composer.length()); setVoiceCallStatus("CONECTANDO CON LA IA…"); sendMessage();
                 } else if (voiceCallActive) postDelayed(() -> beginVoiceRecognition(), 150);
             }
             @Override public void onPartialResults(Bundle partialResults) { }
