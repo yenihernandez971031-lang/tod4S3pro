@@ -978,7 +978,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
             "/api/app/premium/claim", "/api/app/support", "/api/app/ai/chat",
             "/api/app/nikudaria/agent",
             "/api/app/update-decline", "/api/app/device-status", "/api/app/compress",
-            "/api/app/announcements/dismiss", "/api/app/announcements/respond",
+            "/api/app/announcements/respond",
             "/api/ai/login", "/api/ai/logout", "/api/ai/chat",
         }:
             self._json_response({"ok": False, "error": "not_found"}, 404)
@@ -1054,7 +1054,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
             return
         token = self.headers.get("Authorization", "")
         token = token[7:].strip() if token.lower().startswith("bearer ") else ""
-        if parsed.path in {"/api/app/announcements/dismiss", "/api/app/announcements/respond"}:
+        if parsed.path == "/api/app/announcements/respond":
             identity, error, status = _authorize_app_token(token)
             if error:
                 self._json_response(error, status)
@@ -1064,15 +1064,11 @@ class StoreHandler(SimpleHTTPRequestHandler):
                 self._json_response({"ok": False, "error": "invalid_announcement_id"}, 400)
                 return
             try:
-                if parsed.path.endswith("/dismiss"):
-                    changed = sync_api.dismiss_app_announcement(identity["user_id"], announcement_id)
-                    self._json_response({"ok": changed}, 200 if changed else 404)
-                else:
-                    option = body.get("option")
-                    if isinstance(option, bool) or not isinstance(option, int):
-                        raise ValueError("invalid_survey_option")
-                    result = sync_api.respond_app_announcement(identity["user_id"], announcement_id, option)
-                    self._json_response({"ok": True, **result})
+                option = body.get("option")
+                if isinstance(option, bool) or not isinstance(option, int):
+                    raise ValueError("invalid_survey_option")
+                result = sync_api.respond_app_announcement(identity["user_id"], announcement_id, option)
+                self._json_response({"ok": True, **result})
             except ValueError as exc:
                 reason = str(exc)
                 status_code = 409 if reason in {"announcement_expired", "announcement_not_found"} else 400

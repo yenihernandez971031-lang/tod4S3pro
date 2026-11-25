@@ -2345,9 +2345,12 @@ public final class MainActivity extends ComponentActivity {
         if (alreadyOnDashboard) {
             deliveriesBox = null;
             todusSessionStatusText = null;
-            if (currentPage.getChildCount() > 2) {
-                currentPage.removeViewAt(2);
-                currentPage.addView(dashboardTabs(), 2, margin(0, 12, 0, 0));
+            // Hijos fijos: toolbar(0), plan(1), anuncios(2), pestañas(3).
+            // Antes se quitaba el índice 2 y se dejaba la pestaña anterior, por
+            // eso al volver entre Entregas y Descargas aparecían dos pestañas.
+            if (currentPage.getChildCount() > 3) {
+                currentPage.removeViewAt(3);
+                currentPage.addView(dashboardTabs(), 3, margin(0, 12, 0, 0));
             }
             if (currentPage.getChildCount() > 0) {
                 currentPage.removeViewAt(0);
@@ -2360,6 +2363,7 @@ public final class MainActivity extends ComponentActivity {
             if (token != null && !token.isEmpty()) {
                 refreshDeliveries();
                 refreshAppTasks();
+                refreshAnnouncements();
             }
             return;
         }
@@ -2375,7 +2379,7 @@ public final class MainActivity extends ComponentActivity {
         apkAnnouncementsBox = new LinearLayout(this);
         apkAnnouncementsBox.setOrientation(LinearLayout.VERTICAL);
         page.addView(apkAnnouncementsBox, margin(0, 10, 0, 0));
-        renderAnnouncements();
+        renderAnnouncements(true);
         page.addView(dashboardTabs(), margin(0, 12, 0, 0));
         View tabDivider = new View(this);
         tabDivider.setBackgroundColor(borderColor());
@@ -7087,33 +7091,43 @@ public final class MainActivity extends ComponentActivity {
     }
 
     private void renderAnnouncements() {
+        renderAnnouncements(false);
+    }
+
+    private void renderAnnouncements(boolean animateCards) {
         if (apkAnnouncementsBox == null) return;
         apkAnnouncementsBox.removeAllViews();
         for (int i = 0; i < latestAnnouncements.length(); i++) {
             JSONObject announcement = latestAnnouncements.optJSONObject(i);
-            if (announcement != null) apkAnnouncementsBox.addView(buildAnnouncementCard(announcement), margin(0, 0, 0, 9));
+            if (announcement != null) apkAnnouncementsBox.addView(buildAnnouncementCard(announcement, animateCards), margin(0, 0, 0, 9));
         }
         apkAnnouncementsBox.setVisibility(latestAnnouncements.length() == 0 ? View.GONE : View.VISIBLE);
     }
 
-    private LinearLayout buildAnnouncementCard(JSONObject announcement) {
+    private LinearLayout buildAnnouncementCard(JSONObject announcement, boolean animateCards) {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(15), dp(13), dp(13), dp(14));
-        card.setBackground(roundRect(Color.argb(42, 68, 214, 200), 24, Color.argb(90, 68, 214, 200)));
+        card.setBackground(gradientRect(
+                isDarkTheme() ? new int[]{Color.rgb(25, 35, 48), Color.rgb(18, 24, 36)}
+                        : new int[]{Color.rgb(239, 250, 250), Color.WHITE},
+                24, isDarkTheme() ? Color.rgb(53, 224, 205) : Color.rgb(69, 177, 166)));
         card.setElevation(dp(2));
         LinearLayout heading = new LinearLayout(this);
         heading.setGravity(Gravity.CENTER_VERTICAL);
         TextView icon = text(announcement.optString("icon", "📢"), 25, false);
+        icon.setGravity(Gravity.CENTER);
+        icon.setBackground(roundRect(isDarkTheme() ? Color.rgb(24, 75, 82) : Color.rgb(211, 244, 239), 16, 0));
         heading.addView(icon, new LinearLayout.LayoutParams(dp(42), dp(42)));
+        LinearLayout titleColumn = new LinearLayout(this);
+        titleColumn.setOrientation(LinearLayout.VERTICAL);
+        TextView eyebrow = text("AVISO DE TOD4S3", 10, true);
+        eyebrow.setTextColor(accentColor());
+        titleColumn.addView(eyebrow);
         TextView title = text(announcement.optString("title", "Aviso"), 17, true);
-        heading.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
-        TextView close = text("×", 28, true);
-        close.setGravity(Gravity.CENTER);
-        close.setTextColor(accentColor());
-        heading.addView(close, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        titleColumn.addView(title);
+        heading.addView(titleColumn, new LinearLayout.LayoutParams(0, -2, 1));
         card.addView(heading);
-        close.setOnClickListener(v -> dismissAnnouncement(announcement.optString("id", ""), card));
         TextView body = bodyText(announcement.optString("body", ""));
         body.setTextSize(14);
         body.setPadding(dp(42), dp(2), dp(4), dp(8));
@@ -7162,8 +7176,10 @@ public final class MainActivity extends ComponentActivity {
             answered.setPadding(dp(42), dp(5), 0, 0);
             card.addView(answered);
         }
-        card.setAlpha(0f);
-        card.animate().alpha(1f).setDuration(360L).setInterpolator(new DecelerateInterpolator()).start();
+        if (animateCards) {
+            card.setAlpha(0f);
+            card.animate().alpha(1f).setDuration(360L).setInterpolator(new DecelerateInterpolator()).start();
+        }
         return card;
     }
 
@@ -7175,19 +7191,15 @@ public final class MainActivity extends ComponentActivity {
             try {
                 JSONObject result = request("GET", "/api/app/announcements", "", current);
                 JSONArray rows = result.optJSONArray("announcements");
-                runOnUiThread(() -> { announcementsRefreshInFlight = false; latestAnnouncements = rows == null ? new JSONArray() : rows; renderAnnouncements(); });
+                runOnUiThread(() -> {
+                    announcementsRefreshInFlight = false;
+                    JSONArray next = rows == null ? new JSONArray() : rows;
+                    boolean changed = !jsonArraysEqual(latestAnnouncements, next);
+                    latestAnnouncements = next;
+                    if (changed) renderAnnouncements(true);
+                });
             } catch (Exception ignored) { runOnUiThread(() -> announcementsRefreshInFlight = false); }
         }, "announcement-refresh").start();
-    }
-
-    private void dismissAnnouncement(String id, View card) {
-        if (id == null || id.isEmpty()) return;
-        card.setEnabled(false);
-        new Thread(() -> {
-            try { request("POST", "/api/app/announcements/dismiss", new JSONObject().put("announcement_id", id).toString(), token); }
-            catch (Exception ignored) { }
-            runOnUiThread(() -> card.animate().alpha(0f).setDuration(220L).withEndAction(this::refreshAnnouncements).start());
-        }, "announcement-dismiss").start();
     }
 
     private void submitAnnouncementResponse(String id, int option) {

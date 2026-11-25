@@ -1098,6 +1098,15 @@ def apk_announcement_confirmation_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def apk_admin_delete_keyboard(announcements: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for item in announcements[-10:]:
+        title = str(item.get("title", "Aviso"))[:30]
+        rows.append([btn(f"🗑️ {title}", callback_data=f"admin:apk_delete:{item.get('id', '')}")])
+    rows.append([btn("⬅️ Volver a Comunicación", callback_data="admin:menu:comms")])
+    return InlineKeyboardMarkup(rows)
+
+
 def apk_announcement_preview(state: dict) -> str:
     lines = [f"{state.get('icon', '📢')} {state.get('title', '')}", "", str(state.get("body", ""))]
     if state.get("action_url"):
@@ -3388,6 +3397,7 @@ def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
         "comms": [
             [btn("📢 ᴅɪꜰᴜꜱɪóɴ", callback_data="admin:broadcast")],
             [btn("📱 Anuncio APK", callback_data="admin:apk_announcement:start")],
+            [btn("🗑️ Eliminar anuncios APK", callback_data="admin:apk_delete:list")],
             [btn("📖 ᴛᴜᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴏ", callback_data="admin:tutorial")],
         ],
         "ai": [
@@ -5946,6 +5956,32 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.message.reply_text(blocked_user_text())
         return
     register_user(user)
+    if query.data.startswith("admin:apk_delete:"):
+        if not is_owner(user.id) or not update.effective_chat or update.effective_chat.type != "private":
+            await query.answer(sc("Acción solo para el administrador"), show_alert=True)
+            return
+        action = query.data.rsplit(":", 1)[-1]
+        if action == "list":
+            announcements = sync_api.app_announcements_for_admin()
+            await query.answer()
+            if not announcements:
+                await edit_query_message_text(query.message, card("🗑️ ᴀɴᴜɴᴄɪᴏꜱ ᴀᴘᴋ", ["No hay anuncios publicados para eliminar."]),
+                                              reply_markup=InlineKeyboardMarkup([[btn("Volver a Comunicación", callback_data="admin:menu:comms")]]))
+            else:
+                await edit_query_message_text(query.message, card("🗑️ ᴇʟɪᴍɪɴᴀʀ ᴀɴᴜɴᴄɪᴏꜱ ᴀᴘᴋ", ["Selecciona el anuncio que quieres retirar de todas las APK."]),
+                                              reply_markup=apk_admin_delete_keyboard(announcements))
+            return
+        if not re.fullmatch(r"apk_[A-Za-z0-9_-]{8,40}", action):
+            await query.answer(sc("Anuncio no válido"), show_alert=True)
+            return
+        removed = sync_api.delete_app_announcement(action)
+        await query.answer(sc("Anuncio eliminado") if removed else sc("El anuncio ya no existe"), show_alert=not removed)
+        announcements = sync_api.app_announcements_for_admin()
+        if announcements:
+            await edit_query_message_text(query.message, card("🗑️ ᴇʟɪᴍɪɴᴀʀ ᴀɴᴜɴᴄɪᴏꜱ ᴀᴘᴋ", ["Selecciona otro anuncio para retirarlo de todas las APK."]), reply_markup=apk_admin_delete_keyboard(announcements))
+        else:
+            await edit_query_message_text(query.message, card("✅ ᴀɴᴜɴᴄɪᴏ ʀᴇᴛɪʀᴀᴅᴏ", ["Ya no quedan anuncios publicados en la aplicación."]), reply_markup=InlineKeyboardMarkup([[btn("Volver a Comunicación", callback_data="admin:menu:comms")]]))
+        return
     if query.data.startswith("admin:apk_announcement:") or query.data.startswith("admin:apk_survey:"):
         if not is_owner(user.id) or not update.effective_chat or update.effective_chat.type != "private":
             await query.answer(sc("Acción solo para el administrador"), show_alert=True)
@@ -9285,11 +9321,34 @@ async def sync_app_task_request(application: Application, action: str, user_id: 
         expected_parts = row.get("parts")
         messages = todus_messages_for_delivery(user_id, task_id)
         if not isinstance(expected_parts, list) or not expected_parts:
-            return {"ok": False, "error": "delivery_state_ambiguous",
-                    "message": "La entrega no tiene una lista válida de partes; no se borró nada."}, 409
+            removed = sync_api.remove_delivery_for_user(user_id, task_id, row)
+            if removed:
+                schedule_data_backup(application, "limpieza de entrega ToDus antigua")
+                return {"ok": True, "task_id": task_id, "deleted_parts": 0,
+                        "remote_delete_skipped": True}, 200
+            return {"ok": False, "error": "delivery_changed"}, 409
         if len(messages) != len(expected_parts):
-            return {"ok": False, "error": "delivery_messages_incomplete",
-                    "message": "Faltan IDs de mensajes ToDus para una o más partes de esta entrega antigua; no se borró ninguna parte."}, 409
+            # Sin IDs históricos no existe una forma segura de localizar el mensaje
+            # remoto por contenido. No bloqueamos al usuario con un 409: retiramos
+            # la entrega del historial de la app y dejamos el resultado explícito.
+            removed = sync_api.remove_delivery_for_user(user_id, task_id, row)
+            if removed:
+                with _HISTORY_LOCK:
+                    current_history = _load_json(HISTORY_DATA_FILE)
+                    history_rows = current_history.get(str(user_id), [])
+                    if isinstance(history_rows, list):
+                        remaining = [entry for entry in history_rows
+                                     if not (isinstance(entry, dict) and entry.get("task_id") == task_id)]
+                        if remaining:
+                            current_history[str(user_id)] = remaining
+                        else:
+                            current_history.pop(str(user_id), None)
+                        _save_json(HISTORY_DATA_FILE, current_history)
+                schedule_data_backup(application, "limpieza de entrega ToDus sin IDs")
+                return {"ok": True, "task_id": task_id, "deleted_parts": 0,
+                        "remote_delete_skipped": True,
+                        "message": "Entrega retirada del historial; faltaban IDs remotos antiguos."}, 200
+            return {"ok": False, "error": "delivery_changed"}, 409
         history_snapshot = all_task_history().get(str(user_id), [])
         if not isinstance(history_snapshot, list):
             history_snapshot = []
@@ -9373,6 +9432,7 @@ async def sync_app_task_request(application: Application, action: str, user_id: 
                 job_parts_snapshot = {job.task_id: copy.deepcopy(job.part_urls) for job in done_jobs}
         urls = []
         native_rows = {}
+        remote_delete_skipped = 0
         for row in deliveries:
             if not isinstance(row, dict) or row.get("storage_backend") != "todus_native":
                 continue
@@ -9382,8 +9442,11 @@ async def sync_app_task_request(application: Application, action: str, user_id: 
                     or row.get("remote_delete_supported") is not True
                     or not isinstance(parts, list) or not parts
                     or len(todus_messages_for_delivery(user_id, task_id)) != len(parts)):
-                return {"ok": False, "error": "todus_delivery_not_deletable",
-                        "message": "Hay una entrega ToDus antigua sin referencias seguras de borrado; no se vació el historial."}, 409
+                # Las entregas históricas sin IDs remotos no se pueden localizar
+                # de forma segura en ToDus. No bloqueamos el vaciado local: se
+                # conserva la garantía de no borrar un mensaje remoto equivocado.
+                remote_delete_skipped += 1
+                continue
             native_rows[task_id] = row
         for entry in entries:
             if not isinstance(entry, dict):
@@ -9478,8 +9541,11 @@ async def sync_app_task_request(application: Application, action: str, user_id: 
             }, 409
         if ordered_urls or entries or deliveries:
             schedule_data_backup(application, "vaciado personal de archivos de nube desde Android")
-        return {"ok": True, "deleted_files": len(ordered_urls) + native_deleted,
-                "deleted_records": len(entries) + len(deliveries)}, 200
+        result = {"ok": True, "deleted_files": len(ordered_urls) + native_deleted,
+                  "deleted_records": len(entries) + len(deliveries)}
+        if remote_delete_skipped:
+            result["remote_delete_skipped"] = remote_delete_skipped
+        return result, 200
 
     manager: FairTaskQueue = application.bot_data["task_queue"]
     if action == "enqueue":

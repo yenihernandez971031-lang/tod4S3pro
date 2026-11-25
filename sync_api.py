@@ -127,6 +127,37 @@ def app_announcements_for_user(user_id: int) -> list[dict[str, Any]]:
         return result
 
 
+def app_announcements_for_admin() -> list[dict[str, Any]]:
+    """Snapshot administrativo sin exponer respuestas privadas de usuarios."""
+    with _LOCK:
+        rows = _read().get("app_announcements", [])
+        if not isinstance(rows, list):
+            return []
+        result = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            item = _announcement_copy(row, 0)
+            item["response_count"] = len(row.get("responses", {})) if isinstance(row.get("responses"), dict) else 0
+            result.append(item)
+        return result
+
+
+def delete_app_announcement(announcement_id: str) -> bool:
+    """Elimina globalmente un anuncio desde el panel administrativo."""
+    with _LOCK:
+        state = _read()
+        rows = state.get("app_announcements", [])
+        if not isinstance(rows, list):
+            return False
+        kept = [row for row in rows if not (isinstance(row, dict) and row.get("id") == announcement_id)]
+        if len(kept) == len(rows):
+            return False
+        state["app_announcements"] = kept
+        _write(state)
+        return True
+
+
 def dismiss_app_announcement(user_id: int, announcement_id: str) -> bool:
     with _LOCK:
         state = _read()
