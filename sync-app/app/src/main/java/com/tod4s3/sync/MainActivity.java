@@ -5662,6 +5662,7 @@ public final class MainActivity extends ComponentActivity {
                 else if (raw.contains("ai_provider_endpoint")) failure = "El servidor no encontró la dirección de la IA. Se corrigió la ruta del servicio; vuelve a probar cuando termine el despliegue.";
                 else if (raw.contains("ai_provider_request")) failure = "El proveedor rechazó la solicitud. Revisa que el servidor tenga la clave IASINCENSURA completa y actualizada.";
                 else if (raw.contains("ai_provider_access")) failure = "La clave de IA no tiene acceso al servicio. El administrador debe revisar o renovar la clave.";
+                else if (raw.contains("ai_fallback_unavailable")) failure = "El respaldo web de AiTod4S3 no responde ahora. Inténtalo de nuevo más tarde.";
                 else if (raw.contains("ai_provider_error") || raw.contains("ai_invalid_response")) failure = "El proveedor de IA devolvió una respuesta inesperada. Inténtalo de nuevo más tarde.";
                 else if (raw.contains("HTTP 404")) failure = "Railway todavía no tiene activa la ruta nueva de la IA. Espera a que termine el despliegue del backend y vuelve a probar.";
                 else if (raw.contains("HTTP 401")) failure = "La sesión de la aplicación venció. Vuelve a vincular la app desde el bot.";
