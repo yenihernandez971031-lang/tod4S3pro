@@ -1038,7 +1038,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if path in {"/health", "/healthz"}:
-            body = b'{"ok":true,"service":"toduss3store"}'
+            body = b'{"ok":true,"service":"toduss3store","ai_fallback":"web-v1"}'
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
