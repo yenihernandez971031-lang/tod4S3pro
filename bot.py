@@ -6025,7 +6025,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await query.answer()
             await edit_query_message_text(query.message, card("📱 ᴀɴᴜɴᴄɪᴏ ᴀᴘᴋ", [
                 "Este anuncio aparecerá arriba en la aplicación Tod4S3 Sync.",
-                "", "Escribe el título (máximo 80 caracteres).",
+                "", "Escribe el título (máximo 120 caracteres).",
             ]), reply_markup=apk_announcement_cancel_keyboard())
             return
         if action == "cancel":
@@ -6039,7 +6039,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             context.user_data["admin_state"] = state
             await query.answer()
             if action == "yes":
-                await edit_query_message_text(query.message, card("🗳️ ᴇɴᴄᴜᴇꜱᴛᴀ", ["Escribe la pregunta de la encuesta (máximo 180 caracteres)."]), reply_markup=apk_announcement_cancel_keyboard())
+                await edit_query_message_text(query.message, card("🗳️ ᴇɴᴄᴜᴇꜱᴛᴀ", ["Escribe la pregunta de la encuesta (máximo 300 caracteres)."]), reply_markup=apk_announcement_cancel_keyboard())
             else:
                 await edit_query_message_text(query.message, apk_announcement_preview(state), parse_mode=None, reply_markup=apk_announcement_confirmation_keyboard())
             return
@@ -8183,18 +8183,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         if step == "apk_title":
             value = text.strip()
-            if not 1 <= len(value) <= 80:
-                await message.reply_text(sc("El título debe tener entre 1 y 80 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
+            if not 1 <= len(value) <= 120:
+                await message.reply_text(sc("El título debe tener entre 1 y 120 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
                 return
             admin_state.update({"step": "apk_body", "title": value})
             context.user_data["admin_state"] = admin_state
-            await message.reply_text(sc("Escribe el texto del anuncio (máximo 1200 caracteres)."), reply_markup=apk_announcement_cancel_keyboard())
+            await message.reply_text(sc("Escribe el texto del anuncio (máximo 3500 caracteres)."), reply_markup=apk_announcement_cancel_keyboard())
             return
 
         if step == "apk_body":
             value = text.strip()
-            if not 1 <= len(value) <= 1200:
-                await message.reply_text(sc("El texto debe tener entre 1 y 1200 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
+            if not 1 <= len(value) <= 3500:
+                await message.reply_text(sc("El texto debe tener entre 1 y 3500 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
                 return
             admin_state.update({"step": "apk_icon", "body": value})
             context.user_data["admin_state"] = admin_state
@@ -8221,18 +8221,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         if step == "apk_survey_question":
             value = text.strip()
-            if not 1 <= len(value) <= 180:
-                await message.reply_text(sc("La pregunta debe tener entre 1 y 180 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
+            if not 1 <= len(value) <= 300:
+                await message.reply_text(sc("La pregunta debe tener entre 1 y 300 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
                 return
             admin_state.update({"step": "apk_survey_options", "survey_question": value})
             context.user_data["admin_state"] = admin_state
-            await message.reply_text(sc("Escribe entre 2 y 6 opciones separadas por comas (máximo 80 caracteres cada una)."), reply_markup=apk_announcement_cancel_keyboard())
+            await message.reply_text(sc("Escribe entre 2 y 8 opciones separadas por comas, saltos de línea o punto y coma (máximo 120 caracteres cada una)."), reply_markup=apk_announcement_cancel_keyboard())
             return
 
         if step == "apk_survey_options":
-            options = [item.strip() for item in text.split(",") if item.strip()]
-            if not 2 <= len(options) <= 6 or len(set(options)) != len(options) or any(len(item) > 80 for item in options):
-                await message.reply_text(sc("Necesito entre 2 y 6 opciones diferentes, separadas por comas."), reply_markup=apk_announcement_cancel_keyboard())
+            import re
+            options = [item.strip() for item in re.split(r"[,;\n]+", text) if item.strip()]
+            if not 2 <= len(options) <= 8 or len(set(options)) != len(options) or any(len(item) > 120 for item in options):
+                await message.reply_text(sc("Necesito entre 2 y 8 opciones diferentes. Sepáralas por comas, saltos de línea o punto y coma; cada una puede tener hasta 120 caracteres."), reply_markup=apk_announcement_cancel_keyboard())
                 return
             admin_state.update({"step": "apk_confirm", "survey_options": options})
             context.user_data["admin_state"] = admin_state

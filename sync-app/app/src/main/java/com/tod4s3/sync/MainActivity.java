@@ -1321,13 +1321,17 @@ public final class MainActivity extends ComponentActivity {
             int obscuredHeight = Math.max(rootHeight - visibleFrame.bottom,
                     screenHeight - visibleFrame.bottom);
             boolean keyboardVisible = obscuredHeight > dp(160);
-            if (aiKeyboardWasVisible && !keyboardVisible && showingAiChat) {
+            if (showingAiChat && keyboardVisible) {
                 handler.postDelayed(() -> {
-                    if (showingAiChat && appScroll != null) {
-                        appScroll.requestLayout();
-                        appRoot.requestLayout();
+                    if (showingAiChat && aiConversationScroll != null) {
+                        aiConversationScroll.fullScroll(View.FOCUS_DOWN);
+                        if (aiComposer != null && aiComposer.hasFocus()) {
+                            aiComposer.requestRectangleOnScreen(new android.graphics.Rect(0, 0, aiComposer.getWidth(), aiComposer.getHeight()), true);
+                        }
                     }
                 }, 80L);
+            } else if (aiKeyboardWasVisible && !keyboardVisible && showingAiChat) {
+                if (appRoot != null) appRoot.requestLayout();
             }
             aiKeyboardWasVisible = keyboardVisible;
         });
@@ -4713,7 +4717,9 @@ public final class MainActivity extends ComponentActivity {
         LinearLayout page = new LinearLayout(this);
         page.setOrientation(LinearLayout.VERTICAL);
         page.setPadding(dp(20), dp(10), dp(20), dp(14));
-        page.setMinimumHeight(Math.max(dp(520), getResources().getDisplayMetrics().heightPixels - dp(96)));
+        // No fijar la altura al tamaño completo de la pantalla: adjustResize debe
+        // poder reducir este contenedor cuando aparece el teclado.
+        page.setMinimumHeight(0);
         page.setBackground(themedBackground());
 
         LinearLayout header = new LinearLayout(this);
@@ -4819,6 +4825,15 @@ public final class MainActivity extends ComponentActivity {
         aiComposer.setTextSize(15);
         aiComposer.setPadding(dp(7), 0, dp(5), 0);
         aiComposer.setBackgroundColor(Color.TRANSPARENT);
+        aiComposer.setOnFocusChangeListener((view, hasFocus) -> {
+            if (hasFocus) {
+                handler.postDelayed(() -> {
+                    if (aiConversationScroll != null) aiConversationScroll.fullScroll(View.FOCUS_DOWN);
+                    if (aiComposer != null) aiComposer.requestRectangleOnScreen(
+                            new android.graphics.Rect(0, 0, aiComposer.getWidth(), aiComposer.getHeight()), true);
+                }, 180L);
+            }
+        });
         composer.addView(aiComposer, new LinearLayout.LayoutParams(0, dp(44), 1f));
         aiMicButton = new ImageButton(this);
         ((ImageButton) aiMicButton).setImageResource(R.drawable.ic_mic);
@@ -4848,14 +4863,9 @@ public final class MainActivity extends ComponentActivity {
         });
         showPage(page, animated);
         appRoot.post(() -> {
-            if (!showingAiChat || page.getParent() != appRoot) return;
-            int visibleHeight = appRoot.getHeight();
-            if (visibleHeight <= 0) return;
-            page.setMinimumHeight(0);
-            FrameLayout.LayoutParams pageParams = (FrameLayout.LayoutParams) page.getLayoutParams();
-            pageParams.width = -1;
-            pageParams.height = visibleHeight;
-            page.setLayoutParams(pageParams);
+            if (showingAiChat && aiConversationScroll != null) {
+                aiConversationScroll.fullScroll(View.FOCUS_DOWN);
+            }
         });
     }
 

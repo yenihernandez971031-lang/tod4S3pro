@@ -79,16 +79,16 @@ def create_app_announcement(title: str, body: str, icon: str = "📢",
     action_label, action_url = str(action_label or "").strip(), str(action_url or "").strip()
     question = str(survey_question or "").strip()
     options = [str(value).strip() for value in (survey_options or []) if str(value).strip()]
-    if not 1 <= len(title) <= 80 or not 1 <= len(body) <= 1200:
+    if not 1 <= len(title) <= 120 or not 1 <= len(body) <= 3500:
         raise ValueError("invalid_announcement_text")
     if len(icon) > 8 or len(action_label) > 48 or len(action_url) > 2048:
         raise ValueError("invalid_announcement_fields")
     if action_url and not re.fullmatch(r"https?://[^\s<>]+", action_url, re.IGNORECASE):
         raise ValueError("invalid_announcement_url")
     if question or options:
-        if not 1 <= len(question) <= 180 or not 2 <= len(options) <= 6:
+        if not 1 <= len(question) <= 300 or not 2 <= len(options) <= 8:
             raise ValueError("invalid_announcement_survey")
-        if any(len(option) > 80 for option in options) or len(set(options)) != len(options):
+        if any(len(option) > 120 for option in options) or len(set(options)) != len(options):
             raise ValueError("invalid_announcement_survey")
     else:
         question, options = "", []
