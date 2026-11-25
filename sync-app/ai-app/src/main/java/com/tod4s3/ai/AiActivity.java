@@ -195,6 +195,10 @@ public final class AiActivity extends Activity {
         registerParams.gravity = Gravity.CENTER_HORIZONTAL;
         registerParams.setMargins(0, dp(8), 0, 0);
         content.addView(registerButton, registerParams);
+        TextView approvalInfo = label("¿No tienes una cuenta?\nPulsa Crear cuenta y envía tu solicitud. El administrador revisará y aprobará tu cuenta antes de que puedas iniciar sesión.", 12, false, Color.rgb(205, 209, 222));
+        approvalInfo.setGravity(Gravity.CENTER); approvalInfo.setLineSpacing(dp(3), 1f); approvalInfo.setPadding(dp(14), dp(11), dp(14), dp(11));
+        approvalInfo.setBackground(roundStroke(Color.rgb(25, 28, 39), 16, Color.rgb(83, 88, 110)));
+        LinearLayout.LayoutParams approvalParams = new LinearLayout.LayoutParams(fieldWidth, -2); approvalParams.setMargins(0, dp(10), 0, 0); approvalParams.gravity = Gravity.CENTER_HORIZONTAL; content.addView(approvalInfo, approvalParams);
         status = label("▢  Acceso con la cuenta AiTod4S3 que te creó el administrador.", 12, false, Color.rgb(181, 188, 201));
         status.setGravity(Gravity.CENTER);
         status.setPadding(dp(12), dp(12), dp(12), dp(12));
@@ -279,7 +283,7 @@ public final class AiActivity extends Activity {
                 post("/api/ai/register", null, request);
                 runOnUiThread(() -> {
                     loginButton.setEnabled(true);
-                    status.setText("Solicitud enviada. Cuando el administrador la apruebe, inicia sesión con estos datos.");
+                    status.setText("Solicitud enviada correctamente. Tu cuenta queda pendiente de aprobación del administrador. Cuando la apruebe, inicia sesión con estos datos.");
                 });
             } catch (Exception e) {
                 String message = friendlyError(e);
