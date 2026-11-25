@@ -640,7 +640,11 @@ public final class MainActivity extends ComponentActivity {
         content.addView(reject, margin(0, 8, 0, 0));
 
         Dialog dialog = new Dialog(this);
-        dialog.setContentView(content);
+        ScrollView updateScroll = new ScrollView(this);
+        updateScroll.setFillViewport(true);
+        updateScroll.setClipToPadding(false);
+        updateScroll.addView(content, new ScrollView.LayoutParams(-1, -2));
+        dialog.setContentView(updateScroll);
         dialog.setCancelable(true);
         dialog.setCanceledOnTouchOutside(true);
         reject.setOnClickListener(v -> {
@@ -660,7 +664,8 @@ public final class MainActivity extends ComponentActivity {
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.rgb(10, 11, 16)));
-            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT);
+            int maxHeight = (int) (getResources().getDisplayMetrics().heightPixels * 0.92f);
+            window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, maxHeight);
             window.setGravity(Gravity.BOTTOM);
             WindowManager.LayoutParams updateParams = window.getAttributes();
             updateParams.dimAmount = 0.84f;
@@ -7755,23 +7760,32 @@ public final class MainActivity extends ComponentActivity {
                     card.addView(progressBar, progressLayout);
                     LinearLayout cloudActions = new LinearLayout(this);
                     cloudActions.setOrientation(LinearLayout.HORIZONTAL);
+                    if (isAppUpdate) cloudActions.setOrientation(LinearLayout.VERTICAL);
+                    cloudActions.setGravity(Gravity.CENTER_HORIZONTAL);
                     Button download = primaryButton(isAppUpdate ? "Descargar actualización"
                             : partCount > 1 ? "Descargar y unir" : "Descargar");
                     download.setTextSize(13);
                     download.setMinHeight(dp(46));
                     download.setPadding(dp(10), dp(5), dp(10), dp(5));
-                    setButtonIcon(download, R.drawable.ic_download_arrow, Color.rgb(5, 26, 35));
+                    setButtonIcon(download, R.drawable.ic_download_arrow, Color.WHITE);
+                    download.setGravity(Gravity.CENTER);
                     final JSONArray copy = parts;
                     final String copyName = name;
                     final long copySize = size;
                     download.setOnClickListener(v -> startToDusDelivery(taskId, copyName, copy, copySize));
-                    cloudActions.addView(download, new LinearLayout.LayoutParams(0, dp(48), 1.2f));
+                    cloudActions.addView(download, isAppUpdate
+                            ? new LinearLayout.LayoutParams(-1, dp(50))
+                            : new LinearLayout.LayoutParams(0, dp(48), 1.2f));
                     if (!taskId.isEmpty()) {
                         Button hide = secondaryButton("Ocultar");
                         hide.setTextSize(11);
                         hide.setMinHeight(dp(48));
                         hide.setOnClickListener(v -> confirmHideDelivery(taskId, name));
-                        cloudActions.addView(hide, new LinearLayout.LayoutParams(0, dp(48), 0.62f));
+                        LinearLayout.LayoutParams hideLayout = isAppUpdate
+                                ? new LinearLayout.LayoutParams(-1, dp(48))
+                                : new LinearLayout.LayoutParams(0, dp(48), 0.62f);
+                        if (isAppUpdate) hideLayout.topMargin = dp(6);
+                        cloudActions.addView(hide, hideLayout);
                     }
                     if (!taskId.isEmpty() && (cloudDeletable || todusDeletable)) {
                         Button deleteCloud = secondaryButton(todusDeletable ? "Eliminar entrega" : "Eliminar nube");
@@ -7779,15 +7793,19 @@ public final class MainActivity extends ComponentActivity {
                         deleteCloud.setTextColor(Color.rgb(255, 122, 137));
                         deleteCloud.setBackground(roundRect(Color.argb(23, 255, 59, 87), 16, Color.rgb(255, 59, 87)));
                         deleteCloud.setMinHeight(dp(48));
-                        LinearLayout.LayoutParams deleteLayout = new LinearLayout.LayoutParams(0, dp(48), 1f);
-                        deleteLayout.setMargins(dp(8), 0, 0, 0);
+                        LinearLayout.LayoutParams deleteLayout = new LinearLayout.LayoutParams(
+                                isAppUpdate ? -1 : 0, dp(48), isAppUpdate ? 0f : 1f);
+                        if (isAppUpdate) deleteLayout.topMargin = dp(6);
+                        if (!isAppUpdate) deleteLayout.setMargins(dp(8), 0, 0, 0);
                         cloudActions.addView(deleteCloud, deleteLayout);
                         deleteCloud.setOnClickListener(v -> confirmDeleteCloudDelivery(taskId, copyName, todusDeletable));
                     } else if (!taskId.isEmpty()) {
                         TextView storageNote = bodyText("Entrega alojada en ToDus; no se puede borrar desde Nube S3.");
                         storageNote.setTextSize(11);
                         storageNote.setTextColor(Color.rgb(180, 190, 205));
-                        cloudActions.addView(storageNote, new LinearLayout.LayoutParams(0, -2, 1f));
+                        cloudActions.addView(storageNote, isAppUpdate
+                                ? new LinearLayout.LayoutParams(-1, -2)
+                                : new LinearLayout.LayoutParams(0, -2, 1f));
                     }
                     card.addView(cloudActions, margin(0, 8, 0, 0));
                     deliveriesBox.addView(card, margin(0, 0, 0, 8));
