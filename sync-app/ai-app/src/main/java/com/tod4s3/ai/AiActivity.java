@@ -190,7 +190,7 @@ public final class AiActivity extends Activity {
         Button registerButton = button("CREAR CUENTA  +", PANEL);
         registerButton.setTextSize(12);
         registerButton.setBackground(roundStroke(PANEL, 14, Color.rgb(78, 82, 98)));
-        registerButton.setOnClickListener(v -> requestAccount());
+        registerButton.setOnClickListener(v -> showRegisterScreen());
         LinearLayout.LayoutParams registerParams = new LinearLayout.LayoutParams(fieldWidth, dp(48));
         registerParams.gravity = Gravity.CENTER_HORIZONTAL;
         registerParams.setMargins(0, dp(8), 0, 0);
@@ -269,6 +269,24 @@ public final class AiActivity extends Activity {
                 });
             }
         });
+    }
+
+    private void showRegisterScreen() {
+        root = base();
+        ScrollView scrollRegister = new ScrollView(this); scrollRegister.setFillViewport(true); scrollRegister.setVerticalScrollBarEnabled(false);
+        LinearLayout form = column(); form.setGravity(Gravity.CENTER_HORIZONTAL); form.setPadding(dp(22), dp(28), dp(22), dp(24));
+        TextView back = label("‹  Volver al inicio de sesión", 14, true, Color.rgb(220, 225, 238)); back.setGravity(Gravity.CENTER_VERTICAL); back.setContentDescription("Volver al inicio de sesión"); back.setOnClickListener(v -> showLogin()); form.addView(back, lp(-1, 42));
+        form.addView(createAiOrb(dp(82)), lp(82, 82));
+        TextView title = label("Crear cuenta", 28, true, Color.WHITE); title.setGravity(Gravity.CENTER); form.addView(title, margins(-1,-2,0,8,0,4));
+        TextView subtitle = label("Solicita tu cuenta AiTod4S3", 14, false, Color.rgb(170,176,194)); subtitle.setGravity(Gravity.CENTER); form.addView(subtitle, margins(-1,-2,0,0,0,20));
+        int width = Math.min(dp(350), getResources().getDisplayMetrics().widthPixels - dp(44));
+        FrameLayout userBox = crystalField("◯", "Usuario nuevo", false); userField = (EditText) userBox.getTag(); LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(width, dp(62)); up.gravity=Gravity.CENTER_HORIZONTAL; form.addView(userBox,up);
+        space(form,12);
+        FrameLayout passBox = crystalField("▢", "Contraseña nueva", true); passwordField = (EditText) passBox.getTag(); LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(width, dp(62)); pp.gravity=Gravity.CENTER_HORIZONTAL; form.addView(passBox,pp);
+        TextView info = label("La solicitud se enviará al administrador. Podrás iniciar sesión cuando la apruebe.", 12, false, Color.rgb(205,209,222)); info.setGravity(Gravity.CENTER); info.setLineSpacing(dp(3),1f); info.setPadding(dp(14),dp(12),dp(14),dp(12)); info.setBackground(roundStroke(Color.rgb(25,28,39),16,Color.rgb(83,88,110))); form.addView(info, margins(width,-2,0,14,0,0));
+        Button send = button("ENVIAR SOLICITUD", RED); send.setOnClickListener(v -> requestAccount()); form.addView(send, lp(width,56));
+        status = label("Usa un usuario válido y una contraseña de mínimo 10 caracteres.",12,false,Color.rgb(181,188,201)); status.setGravity(Gravity.CENTER); status.setPadding(dp(12),dp(12),dp(12),dp(12)); form.addView(status,margins(width,-2,0,12,0,0));
+        scrollRegister.addView(form,new ScrollView.LayoutParams(-1,-2)); root.addView(scrollRegister,new LinearLayout.LayoutParams(-1,0,1f));
     }
 
     private void requestAccount() {
