@@ -17,6 +17,8 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.LinearGradient;
 import android.graphics.Shader;
+import android.graphics.BitmapFactory;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.animation.ObjectAnimator;
 import android.animation.PropertyValuesHolder;
@@ -116,12 +118,16 @@ public final class AiActivity extends Activity {
     private boolean dictating = false;
     private ImageButton micButton;
     private TextToSpeech tts;
+    private Typeface uiTypeface;
+    private Typeface uiBoldTypeface;
 
     @Override public void onCreate(Bundle state) {
         super.onCreate(state);
         getWindow().setStatusBarColor(Color.rgb(9, 10, 15));
         getWindow().setNavigationBarColor(Color.rgb(9, 10, 15));
         prefs = getSharedPreferences("ai_tod4s3_private", MODE_PRIVATE);
+        uiTypeface = Typeface.createFromAsset(getAssets(), "fonts/AiTod4S3-Regular.ttf");
+        uiBoldTypeface = Typeface.createFromAsset(getAssets(), "fonts/AiTod4S3-Bold.ttf");
         token = prefs.getString("session_token", "");
         username = prefs.getString("session_user", "");
         tts = new TextToSpeech(this, result -> {
@@ -898,14 +904,15 @@ public final class AiActivity extends Activity {
     private LinearLayout base() {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
-        view.setBackground(gradientRound(new int[]{Color.rgb(8, 10, 17), Color.rgb(14, 13, 24), Color.rgb(7, 9, 15)}, 0));
+        BitmapDrawable backdrop = new BitmapDrawable(getResources(), BitmapFactory.decodeResource(getResources(), R.drawable.bg_aitod4s3));
+        backdrop.setGravity(Gravity.FILL); view.setBackground(backdrop);
         setContentView(view);
         return view;
     }
     private LinearLayout column() { LinearLayout l = new LinearLayout(this); l.setOrientation(LinearLayout.VERTICAL); return l; }
     private TextView label(String text, int size, boolean bold, int color) {
         TextView v = new TextView(this); v.setText(text); v.setTextSize(size); v.setTextColor(color);
-        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        if (bold && uiBoldTypeface != null) v.setTypeface(uiBoldTypeface); else if (uiTypeface != null) v.setTypeface(uiTypeface);
         return v;
     }
     private FrameLayout crystalField(String iconText, String fieldLabel, boolean password) {
