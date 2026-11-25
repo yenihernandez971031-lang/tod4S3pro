@@ -113,6 +113,8 @@ public final class AiActivity extends Activity {
     private boolean ttsReady = false;
     private boolean micPermissionPending = false;
     private boolean voiceCallPermissionPending = false;
+    private boolean dictating = false;
+    private ImageButton micButton;
     private TextToSpeech tts;
 
     @Override public void onCreate(Bundle state) {
@@ -216,9 +218,12 @@ public final class AiActivity extends Activity {
         TextView footer = label("Conexión cifrada", 11, false, Color.rgb(121, 128, 147));
         footer.setGravity(Gravity.CENTER);
         content.addView(footer, margins(-1, -2, 0, 10, 0, 0));
+        ScrollView loginScroll = new ScrollView(this);
+        loginScroll.setFillViewport(true); loginScroll.setClipToPadding(false); loginScroll.setVerticalScrollBarEnabled(false);
+        loginScroll.setBackgroundColor(Color.TRANSPARENT); loginScroll.addView(content, new ScrollView.LayoutParams(-1, -2));
         FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
                 Math.min(dp(390), getResources().getDisplayMetrics().widthPixels - dp(28)), -1, Gravity.CENTER);
-        stage.addView(content, contentParams);
+        stage.addView(loginScroll, contentParams);
         root.addView(stage, new LinearLayout.LayoutParams(-1, 0, 1f));
         ObjectAnimator breathe = ObjectAnimator.ofPropertyValuesHolder(orb,
                 PropertyValuesHolder.ofFloat(View.SCALE_X, 1f, 1.035f, 1f),
@@ -282,9 +287,10 @@ public final class AiActivity extends Activity {
         welcomePanel = null;
         LinearLayout page = column();
         page.setPadding(dp(14), dp(10), dp(14), dp(10));
+        page.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        menuButton = label("☰", 22, true, Color.WHITE);
+        menuButton = label("≡", 28, false, Color.WHITE);
         menuButton.setGravity(Gravity.CENTER);
         menuButton.setContentDescription("Abrir menú lateral");
         menuButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
@@ -302,7 +308,7 @@ public final class AiActivity extends Activity {
         header.addView(callButton, lp(42,42));
         TextView newChat = label("✎", 20, true, Color.WHITE); newChat.setGravity(Gravity.CENTER);
         newChat.setContentDescription("Nuevo chat"); newChat.setBackground(roundStroke(Color.rgb(29,31,40), 15, Color.rgb(78,82,98)));
-        newChat.setOnClickListener(v -> { history.clear(); saveHistory(); renderEmptyChat(); });
+        newChat.setOnClickListener(v -> startNewChat());
         header.addView(newChat, lp(42, 42));
         page.addView(header, margins(-1, 48, 0, 0, 0, 8));
         scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setVerticalScrollBarEnabled(false);
@@ -323,7 +329,7 @@ public final class AiActivity extends Activity {
         LinearLayout composerRow = new LinearLayout(this); composerRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView plus = label("+", 25, false, Color.WHITE); plus.setGravity(Gravity.CENTER); plus.setBackground(round(Color.rgb(32,35,48), 20)); plus.setOnClickListener(v -> showAttachmentSheet()); composerRow.addView(plus, lp(40,40));
         composer = new EditText(this); composer.setSingleLine(false); composer.setMaxLines(5); composer.setHint("Pregúntale a AiTod4S3…"); composer.setTextColor(Color.rgb(244,245,249)); composer.setHintTextColor(Color.rgb(109,115,132)); composer.setTextSize(15); composer.setPadding(dp(7),0,dp(5),0); composer.setBackgroundColor(Color.TRANSPARENT); composer.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE); composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(5000)}); composer.setImeOptions(EditorInfo.IME_ACTION_SEND); composerRow.addView(composer, new LinearLayout.LayoutParams(0, dp(48), 1f));
-        ImageButton mic = iconButton(R.drawable.ic_mic, Color.WHITE, "Dictar mensaje por voz"); mic.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); mic.setOnClickListener(v -> beginDictation()); composerRow.addView(mic, lp(42,42));
+        micButton = iconButton(R.drawable.ic_mic, Color.WHITE, "Dictar mensaje por voz"); micButton.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); micButton.setOnClickListener(v -> { if (dictating) stopDictation(); else beginDictation(); }); composerRow.addView(micButton, lp(42,42));
         sendButton = iconButton(R.drawable.ic_send, Color.WHITE, "Enviar mensaje a AiTod4S3"); sendButton.setBackground(gradientRound(new int[]{RED,Color.rgb(193,18,46)},24)); sendButton.setOnClickListener(v -> sendMessage()); composerRow.addView(sendButton, lp(44,44)); composerShell.addView(composerRow, new FrameLayout.LayoutParams(-1,-1)); page.addView(composerShell, lp(-1,-2));
         composer.setOnEditorActionListener((view, actionId, event) -> { if (actionId == EditorInfo.IME_ACTION_SEND) { sendMessage(); return true; } return false; }); composer.setOnFocusChangeListener((view, focused) -> { if (focused) scroll.postDelayed(() -> scroll.fullScroll(View.FOCUS_DOWN), 180); });
         root.addView(page, new LinearLayout.LayoutParams(-1,0,1f));
@@ -352,10 +358,14 @@ public final class AiActivity extends Activity {
         LinearLayout panel=column();panel.setPadding(dp(18),dp(20),dp(18),dp(14));panel.setBackground(roundStroke(Color.rgb(11,13,20),22,Color.rgb(55,59,78)));
         LinearLayout brand=new LinearLayout(this);brand.setGravity(Gravity.CENTER_VERTICAL);brand.addView(createAiOrb(dp(42)),lp(42,42));brand.addView(label("AiTod4S3",20,true,Color.WHITE),margins(-1,-2,10,0,0,0));panel.addView(brand,lp(-1,48));
         EditText search=edit("Buscar chats",InputType.TYPE_CLASS_TEXT);panel.addView(search,margins(-1,48,0,14,0,0));
-        Button fresh=button("✎  Nuevo chat",RED);fresh.setOnClickListener(v->{history.clear();saveHistory();renderEmptyChat();});panel.addView(fresh,lp(-1,50));
-        panel.addView(label("PROYECTOS",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8)); panel.addView(label("▱  Tod4S3 Sync",14,false,Color.WHITE),lp(-1,34)); panel.addView(label("▱  Bot de Telegram",14,false,Color.WHITE),lp(-1,34));
-        panel.addView(label("FIJADOS",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8)); panel.addView(label("⚑  Comando /anuncio",14,false,Color.WHITE),lp(-1,34));
-        panel.addView(label("HISTORIAL",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8)); panel.addView(label(history.isEmpty()?"Aún no hay conversaciones":"Conversación actual",14,false,Color.WHITE),lp(-1,34));
+        search.addTextChangedListener(new android.text.TextWatcher(){ public void beforeTextChanged(CharSequence x,int a,int b,int c){} public void onTextChanged(CharSequence x,int a,int b,int c){ if(!history.isEmpty() && !history.toString().toLowerCase(Locale.ROOT).contains(x.toString().toLowerCase(Locale.ROOT))) Toast.makeText(AiActivity.this,"No hay coincidencias en esta conversación.",Toast.LENGTH_SHORT).show(); } public void afterTextChanged(android.text.Editable x){} });
+        Button fresh=button("+  Nuevo chat",RED);fresh.setOnClickListener(v->{startNewChat();});panel.addView(fresh,lp(-1,50));
+        panel.addView(label("PROYECTOS",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8));
+        TextView cue=label("◈  Cue  ·  Conectar asistente",14,true,Color.WHITE); cue.setPadding(dp(8),0,dp(8),0); cue.setGravity(Gravity.CENTER_VERTICAL); cue.setBackground(roundStroke(Color.rgb(24,27,38),14,Color.rgb(57,61,78))); cue.setOnClickListener(v->{prefs.edit().putBoolean("cue_connector_enabled",true).apply(); Toast.makeText(this,"Conector Cue activado en esta app.",Toast.LENGTH_SHORT).show();}); panel.addView(cue,margins(-1,44,0,6,0,0));
+        TextView sync=label("▱  Tod4S3 Sync",14,false,Color.WHITE); sync.setPadding(dp(8),0,dp(8),0); panel.addView(sync,lp(-1,34));
+        panel.addView(label("HISTORIAL",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8));
+        TextView current=label(history.isEmpty()?"Aún no hay mensajes":"Conversación actual",14,false,Color.WHITE); current.setPadding(dp(8),0,dp(8),0); current.setOnClickListener(v->{ showChat(); }); panel.addView(current,lp(-1,38));
+        TextView memory=label("Memoria local: activa",12,true,Color.rgb(75,224,154)); memory.setPadding(dp(8),0,dp(8),0); panel.addView(memory,lp(-1,32));
         TextView tg=label("◉  Canal de Telegram   ›",14,true,Color.WHITE);tg.setPadding(dp(8),0,dp(8),0);tg.setGravity(Gravity.CENTER_VERTICAL);tg.setOnClickListener(v->openTelegramChannel());panel.addView(tg,margins(-1,48,0,16,0,0));
         Dialog d=new Dialog(this);d.setContentView(panel);d.setCancelable(true);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));w.setLayout(Math.min(dp(360),getResources().getDisplayMetrics().widthPixels-dp(20)),WindowManager.LayoutParams.MATCH_PARENT);}
     }
@@ -406,7 +416,10 @@ public final class AiActivity extends Activity {
         sendButton.setEnabled(false);
         if (chatStatus != null) chatStatus.setText("pensando…");
         JSONArray messages = new JSONArray();
-        int from = Math.max(0, history.size() - 12);
+        JSONArray remembered = new JSONArray();
+        try { remembered = new JSONArray(prefs.getString("memory_" + username, "[]")); } catch (Exception ignored) {}
+        for (int i = Math.max(0, remembered.length() - 4); i < remembered.length(); i++) messages.put(remembered.optJSONObject(i));
+        int from = Math.max(0, history.size() - Math.max(1, 12 - messages.length()));
         for (int i = from; i < history.size(); i++) messages.put(history.get(i));
         io.execute(() -> {
             try {
@@ -420,6 +433,8 @@ public final class AiActivity extends Activity {
                     try {
                         JSONObject assistant = new JSONObject().put("role", "assistant").put("content", reply);
                         history.add(assistant);
+                        JSONArray rememberedHistory = new JSONArray(); try { rememberedHistory = new JSONArray(prefs.getString("memory_" + username, "[]")); } catch (Exception ignored) {}
+                        rememberedHistory.put(userMessage); rememberedHistory.put(assistant); while (rememberedHistory.length() > 12) rememberedHistory.remove(0); prefs.edit().putString("memory_" + username, rememberedHistory.toString()).apply();
                         trimHistory();
                         saveHistory();
                     } catch (JSONException ignored) { }
@@ -463,19 +478,23 @@ public final class AiActivity extends Activity {
         }
         if (speechRecognizer == null) speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
         speechRecognizer.cancel();
+        dictating = true;
+        if (micButton != null) { micButton.setContentDescription("Detener dictado"); micButton.setBackground(roundStroke(Color.rgb(75,45,55),22,RED)); }
+        Toast.makeText(this,"Escuchando… habla ahora",Toast.LENGTH_SHORT).show();
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override public void onReadyForSpeech(Bundle params) { if (chatStatus != null) chatStatus.setText("escuchando…"); }
             @Override public void onBeginningOfSpeech() { speechStartedAt = SystemClock.uptimeMillis(); }
             @Override public void onRmsChanged(float rms) { }
             @Override public void onBufferReceived(byte[] buffer) { }
             @Override public void onEndOfSpeech() { if (chatStatus != null) chatStatus.setText("procesando…"); }
-            @Override public void onError(int error) { if (chatStatus != null) chatStatus.setText("en línea"); }
+            @Override public void onError(int error) { dictating=false; if (micButton != null) { micButton.setContentDescription("Dictar mensaje por voz"); micButton.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); } if (chatStatus != null) chatStatus.setText("en línea"); }
             @Override public void onResults(Bundle results) {
                 ArrayList<String> values = results == null ? null : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
                 String phrase = values == null || values.isEmpty() ? "" : values.get(0);
                 if (isUsableVoicePhrase(phrase, results) && composer != null) {
                     composer.setText(phrase.trim()); composer.setSelection(composer.length());
                 }
+                dictating=false; if (micButton != null) { micButton.setContentDescription("Dictar mensaje por voz"); micButton.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); }
                 if (chatStatus != null) chatStatus.setText("en línea");
             }
             @Override public void onPartialResults(Bundle partialResults) { }
@@ -488,6 +507,10 @@ public final class AiActivity extends Activity {
         intent.putExtra(RecognizerIntent.EXTRA_PROMPT, "Habla con AiTod4S3");
         speechRecognizer.startListening(intent);
     }
+
+    private void stopDictation() { if (speechRecognizer != null) speechRecognizer.stopListening(); dictating=false; if (micButton != null) { micButton.setContentDescription("Dictar mensaje por voz"); micButton.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); } if (chatStatus != null) chatStatus.setText("en línea"); }
+
+    private void startNewChat() { if (sending) { Toast.makeText(this,"Espera a que termine la respuesta o deténla.",Toast.LENGTH_SHORT).show(); return; } history.clear(); saveHistory(); chatMode="fast"; webEnabled=false; thinkEnabled=false; imageEnabled=false; showChat(); Toast.makeText(this,"Nuevo chat listo. La memoria guardada se conserva.",Toast.LENGTH_SHORT).show(); }
 
     private boolean isUsableVoicePhrase(String phrase, Bundle results) {
         if (phrase == null) return false;
@@ -769,6 +792,9 @@ public final class AiActivity extends Activity {
         if (!voiceCallActive) return;
         if (speechRecognizer == null) speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
         speechRecognizer.cancel();
+        dictating = true;
+        if (micButton != null) { micButton.setContentDescription("Detener dictado"); micButton.setBackground(roundStroke(Color.rgb(75,45,55),22,RED)); }
+        Toast.makeText(this,"Escuchando… habla ahora",Toast.LENGTH_SHORT).show();
         speechRecognizer.setRecognitionListener(new RecognitionListener() {
             @Override public void onReadyForSpeech(Bundle params) { setVoiceCallStatus("ESCUCHANDO…"); }
             @Override public void onBeginningOfSpeech() { speechStartedAt = SystemClock.uptimeMillis(); }
@@ -881,7 +907,7 @@ public final class AiActivity extends Activity {
     private LinearLayout base() {
         LinearLayout view = new LinearLayout(this);
         view.setOrientation(LinearLayout.VERTICAL);
-        view.setBackgroundColor(BG);
+        view.setBackground(gradientRound(new int[]{Color.rgb(8, 10, 17), Color.rgb(14, 13, 24), Color.rgb(7, 9, 15)}, 0));
         setContentView(view);
         return view;
     }
@@ -961,6 +987,7 @@ public final class AiActivity extends Activity {
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + .5f); }
 
     @Override protected void onDestroy() {
+        if (speechRecognizer != null) { speechRecognizer.cancel(); speechRecognizer.destroy(); speechRecognizer = null; }
         if (tts != null) { tts.stop(); tts.shutdown(); }
         io.shutdownNow();
         super.onDestroy();
