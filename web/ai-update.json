@@ -1,7 +1,7 @@
 {
-  "version_code": 7,
-  "version_name": "1.0.6",
+  "version_code": 8,
+  "version_name": "1.0.7",
   "manifest_url": "https://tod4s3pro-production.up.railway.app/ai-update.json",
-  "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/AiTod4S3-1.0.6-signed.apk",
-  "sha256": "5a0f7672af9b3387235cdb21b65d05f6c7f08ad4999542d6c7dd3df034c213d6"
+  "apk_url": "https://raw.githubusercontent.com/yenihernandez971031-lang/tod4S3pro/main/AiTod4S3-v1.0.7-signed.apk",
+  "sha256": "57adb6f1814f83021b4b6250b04d376d38b9d4cefd625cc47de9560c37cc2793"
 }

@@ -755,7 +755,9 @@ public final class AiActivity extends Activity {
         if (raw.contains("unauthorized")) return "La sesión venció. Inicia sesión otra vez.";
         if (raw.contains("login_rate_limited")) return "Demasiados intentos. Espera unos minutos.";
         if (raw.contains("ai_rate_limited")) return "Espera un momento antes de enviar otro mensaje.";
-        if (raw.contains("ai_not_configured") || raw.contains("ai_unavailable")) return "La IA no está disponible temporalmente.";
+        if (raw.contains("ai_not_configured")) return "La IA no está configurada temporalmente. El respaldo automático también está iniciándose.";
+        if (raw.contains("ai_fallback_unavailable")) return "La IA principal y su respaldo web no responden ahora. Inténtalo de nuevo más tarde.";
+        if (raw.contains("ai_unavailable")) return "La IA no está disponible temporalmente.";
         if (raw.contains("UnknownHostException") || raw.contains("ConnectException")) return "No hay conexión con AiTod4S3. Comprueba Internet.";
         return "No se pudo completar la solicitud. Comprueba la conexión e inténtalo de nuevo.";
     }

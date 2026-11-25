@@ -726,14 +726,21 @@ def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[d
             if oldest != username:
                 _AI_ACCOUNT_REQUESTS.pop(oldest, None)
                 _AI_ACCOUNT_DAILY_REQUESTS.pop(oldest, None)
-    api_key = os.getenv("IASINCENSURA", "").strip()
-    if not api_key.startswith("sk-notrack-") or len(api_key) < 24 or any(c.isspace() for c in api_key):
-        return {"ok": False, "error": "ai_not_configured"}, 503
     system = (
         "Eres AiTod4S3, un asistente general experto, claro y preciso. Responde en el idioma del usuario. "
         "Sé directo y honesto; no inventes datos. Nunca solicites contraseñas, códigos, PIN, tokens ni datos de pago. "
         "No afirmes tener acceso al teléfono, cuentas ni información en tiempo real."
     )
+    api_key = os.getenv("IASINCENSURA", "").strip()
+    if not api_key.startswith("sk-notrack-") or len(api_key) < 24 or any(c.isspace() for c in api_key):
+        try:
+            answer = _notrack_web_chat("\n\n".join(
+                f"{item['role'].upper()}: {item['content']}"
+                for item in [{"role": "system", "content": system}, *clean]
+            ))
+        except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
+            return {"ok": False, "error": "ai_fallback_unavailable"}, 503
+        return {"ok": True, "reply": answer}, 200
     request_body = json.dumps({
         "model": "notrack-uncensored",
         "messages": [{"role": "system", "content": system}, *clean],
@@ -753,9 +760,25 @@ def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[d
         error = {401: "ai_provider_auth", 429: "ai_busy", 404: "ai_provider_endpoint",
                  400: "ai_provider_request", 403: "ai_provider_access", 503: "ai_unavailable"}.get(
                      exc.code, "ai_provider_error" if exc.code < 500 else "ai_unavailable")
+        if exc.code in {401, 402, 403, 429, 500, 502, 503, 504}:
+            try:
+                answer = _notrack_web_chat("\n\n".join(
+                    f"{item['role'].upper()}: {item['content']}"
+                    for item in [{"role": "system", "content": system}, *clean]
+                ))
+                return {"ok": True, "reply": answer}, 200
+            except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
+                return {"ok": False, "error": "ai_fallback_unavailable"}, 503
         return {"ok": False, "error": error}, 429 if exc.code == 429 else 502 if exc.code < 500 else 503
     except (TimeoutError, urllib.error.URLError, OSError, ValueError, json.JSONDecodeError):
-        return {"ok": False, "error": "ai_unavailable"}, 502
+        try:
+            answer = _notrack_web_chat("\n\n".join(
+                f"{item['role'].upper()}: {item['content']}"
+                for item in [{"role": "system", "content": system}, *clean]
+            ))
+            return {"ok": True, "reply": answer}, 200
+        except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
+            return {"ok": False, "error": "ai_fallback_unavailable"}, 503
     finally:
         _AI_GATEWAY_SEMAPHORE.release()
     try:

@@ -36,7 +36,7 @@ Eso revoca sus sesiones y permite que el siguiente Android que inicie sesión qu
 
 Las cuentas se guardan en `AI_ACCOUNTS_FILE`, cuyo valor predeterminado en el bot es `ai_app_accounts.json` dentro de `DATA_DIR` (en Railway debe ser un volumen persistente). Las contraseñas se verifican con PBKDF2-HMAC-SHA256 y sal aleatoria; la contraseña no se almacena en claro. El archivo se escribe atómicamente con permisos restrictivos. Los tokens aleatorios de sesión duran 30 días y se guarda solo su hash; reemplazar o desactivar una cuenta revoca sus sesiones. La vinculación por Android ID impide el uso normal simultáneo desde otro teléfono; no equivale a atestación de hardware y un dispositivo rooteado con herramientas para falsificar identificadores podría evadirla.
 
-El chat limita cada cuenta a 8 solicitudes/minuto y 80/día por defecto (`AI_APP_DAILY_LIMIT` puede ajustarse). El endpoint móvil usa HTTPS fijo. `IASINCENSURA` debe estar configurada en el backend, igual que para el servicio de IA existente.
+El chat limita cada cuenta a 8 solicitudes/minuto y 80/día por defecto (`AI_APP_DAILY_LIMIT` puede ajustarse). El endpoint móvil usa HTTPS fijo. Si `IASINCENSURA` está configurada, se usa primero la API principal; si falta o falla, el backend usa automáticamente el chat web de NoTrack como respaldo, sin exponer claves en la APK.
 
 ## Compilación
 
