@@ -1476,11 +1476,7 @@ public final class MainActivity extends ComponentActivity {
         wallpaperScrim = null;
         appRoot.setBackground(themedBackground());
         appRoot.removeView(appScroll);
-        // No dibujar fondos de galería debajo de la interfaz principal. Una imagen
-        // guardada anteriormente podía cubrir visualmente Descargas y el menú con
-        // un tinte rojo, dando la impresión de que la pantalla se había bloqueado.
-        // El fondo oficial de la app es sólido y las tarjetas ya aportan el contraste.
-        String imageUri = "";
+        String imageUri = prefs.getString(PREF_WALLPAPER_URI, "");
         if (imageUri != null && !imageUri.isEmpty()) {
             try {
                 Bitmap bitmap = decodeWallpaper(Uri.parse(imageUri));
@@ -7124,6 +7120,13 @@ public final class MainActivity extends ComponentActivity {
         TextView title = text(announcement.optString("title", "Aviso"), 17, true);
         titleColumn.addView(title);
         heading.addView(titleColumn, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView dismiss = text("×", 28, true);
+        dismiss.setTextColor(secondaryTextColor());
+        dismiss.setGravity(Gravity.CENTER);
+        dismiss.setContentDescription("Ocultar anuncio");
+        dismiss.setPadding(dp(7), 0, 0, 0);
+        dismiss.setOnClickListener(v -> dismissAnnouncement(announcement.optString("id", "")));
+        heading.addView(dismiss, new LinearLayout.LayoutParams(dp(38), dp(42)));
         card.addView(heading);
         TextView body = bodyText(announcement.optString("body", ""));
         body.setTextSize(14);
@@ -7206,6 +7209,23 @@ public final class MainActivity extends ComponentActivity {
                 runOnUiThread(() -> { Toast.makeText(this, "Respuesta registrada.", Toast.LENGTH_SHORT).show(); refreshAnnouncements(); });
             } catch (Exception ignored) { runOnUiThread(() -> Toast.makeText(this, "No se pudo registrar la respuesta.", Toast.LENGTH_SHORT).show()); }
         }, "announcement-response").start();
+    }
+
+    private void dismissAnnouncement(String id) {
+        if (id == null || id.trim().isEmpty()) return;
+        JSONArray remaining = new JSONArray();
+        for (int i = 0; i < latestAnnouncements.length(); i++) {
+            JSONObject item = latestAnnouncements.optJSONObject(i);
+            if (item != null && !id.equals(item.optString("id", ""))) remaining.put(item);
+        }
+        latestAnnouncements = remaining;
+        renderAnnouncements(false);
+        new Thread(() -> {
+            try {
+                request("POST", "/api/app/announcements/dismiss",
+                        new JSONObject().put("announcement_id", id).toString(), token);
+            } catch (Exception ignored) { }
+        }, "announcement-dismiss").start();
     }
 
     private void refreshDeliveries() {

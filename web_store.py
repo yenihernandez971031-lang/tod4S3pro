@@ -978,7 +978,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
             "/api/app/premium/claim", "/api/app/support", "/api/app/ai/chat",
             "/api/app/nikudaria/agent",
             "/api/app/update-decline", "/api/app/device-status", "/api/app/compress",
-            "/api/app/announcements/respond",
+            "/api/app/announcements/respond", "/api/app/announcements/dismiss",
             "/api/ai/login", "/api/ai/logout", "/api/ai/chat",
         }:
             self._json_response({"ok": False, "error": "not_found"}, 404)
@@ -1073,6 +1073,20 @@ class StoreHandler(SimpleHTTPRequestHandler):
                 reason = str(exc)
                 status_code = 409 if reason in {"announcement_expired", "announcement_not_found"} else 400
                 self._json_response({"ok": False, "error": reason}, status_code)
+            return
+        if parsed.path == "/api/app/announcements/dismiss":
+            identity, error, status = _authorize_app_token(token)
+            if error:
+                self._json_response(error, status)
+                return
+            announcement_id = body.get("announcement_id")
+            if not isinstance(announcement_id, str) or not re.fullmatch(r"apk_[A-Za-z0-9_-]{8,40}", announcement_id):
+                self._json_response({"ok": False, "error": "invalid_announcement_id"}, 400)
+                return
+            if not sync_api.dismiss_app_announcement(identity["user_id"], announcement_id):
+                self._json_response({"ok": False, "error": "announcement_not_found"}, 404)
+                return
+            self._json_response({"ok": True, "dismissed": True})
             return
         if parsed.path == "/api/ai/logout":
             try:
