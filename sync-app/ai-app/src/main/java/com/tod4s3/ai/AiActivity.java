@@ -290,12 +290,8 @@ public final class AiActivity extends Activity {
         page.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        menuButton = label("≡", 28, false, Color.WHITE);
-        menuButton.setGravity(Gravity.CENTER);
-        menuButton.setContentDescription("Abrir menú lateral");
-        menuButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
-        menuButton.setOnClickListener(v -> showSideMenu());
-        header.addView(menuButton, lp(42, 42));
+        View headerSpacer = new View(this);
+        header.addView(headerSpacer, lp(42, 42));
         modeButton = button("AiTod4S3 · Rápido⌄", Color.rgb(22, 24, 34));
         modeButton.setTextSize(12); modeButton.setGravity(Gravity.CENTER);
         modeButton.setBackground(roundStroke(Color.rgb(22, 24, 34), 16, Color.rgb(64, 68, 87)));
@@ -317,17 +313,12 @@ public final class AiActivity extends Activity {
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
         if (history.isEmpty()) addWelcomeState(); else for (JSONObject item : history) addBubble(item.optString("content", ""), "user".equals(item.optString("role")));
         LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
-        webTool = toolChip("◉  Web", false); thinkTool = toolChip("✦  Pensar", false); imageTool = toolChip("▧  Imagen", false);
-        tools.addView(webTool, new LinearLayout.LayoutParams(0, dp(34), 1f)); tools.addView(thinkTool, margins(0,34,5,0,5,0)); tools.addView(imageTool, new LinearLayout.LayoutParams(0, dp(34), 1f));
+        webTool = toolChip("◉  Web", false); thinkTool = toolChip("✦  Pensar", false); imageTool = null;
+        tools.addView(webTool, new LinearLayout.LayoutParams(0, dp(34), 1f)); tools.addView(thinkTool, new LinearLayout.LayoutParams(0, dp(34), 1f));
         page.addView(tools, margins(-1, -2, 0, 4, 0, 2));
-        attachmentChip = label("", 11, true, Color.rgb(220,225,238));
-        attachmentChip.setVisibility(View.GONE); attachmentChip.setPadding(dp(10),0,dp(10),0);
-        attachmentChip.setBackground(roundStroke(Color.rgb(27,30,42),14,Color.rgb(68,72,94)));
-        attachmentChip.setOnClickListener(v -> clearAttachment());
-        page.addView(attachmentChip, margins(-1,32,0,0,0,4));
+        attachmentChip = null;
         FrameLayout composerShell = new FrameLayout(this); composerShell.setPadding(dp(7), dp(6), dp(7), dp(6)); composerShell.setBackground(roundStroke(Color.rgb(11,12,18), 25, RED));
         LinearLayout composerRow = new LinearLayout(this); composerRow.setGravity(Gravity.CENTER_VERTICAL);
-        TextView plus = label("+", 25, false, Color.WHITE); plus.setGravity(Gravity.CENTER); plus.setBackground(round(Color.rgb(32,35,48), 20)); plus.setOnClickListener(v -> showAttachmentSheet()); composerRow.addView(plus, lp(40,40));
         composer = new EditText(this); composer.setSingleLine(false); composer.setMaxLines(5); composer.setHint("Pregúntale a AiTod4S3…"); composer.setTextColor(Color.rgb(244,245,249)); composer.setHintTextColor(Color.rgb(109,115,132)); composer.setTextSize(15); composer.setPadding(dp(7),0,dp(5),0); composer.setBackgroundColor(Color.TRANSPARENT); composer.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE); composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(5000)}); composer.setImeOptions(EditorInfo.IME_ACTION_SEND); composerRow.addView(composer, new LinearLayout.LayoutParams(0, dp(48), 1f));
         micButton = iconButton(R.drawable.ic_mic, Color.WHITE, "Dictar mensaje por voz"); micButton.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); micButton.setOnClickListener(v -> { if (dictating) stopDictation(); else beginDictation(); }); composerRow.addView(micButton, lp(42,42));
         sendButton = iconButton(R.drawable.ic_send, Color.WHITE, "Enviar mensaje a AiTod4S3"); sendButton.setBackground(gradientRound(new int[]{RED,Color.rgb(193,18,46)},24)); sendButton.setOnClickListener(v -> sendMessage()); composerRow.addView(sendButton, lp(44,44)); composerShell.addView(composerRow, new FrameLayout.LayoutParams(-1,-1)); page.addView(composerShell, lp(-1,-2));
@@ -424,7 +415,7 @@ public final class AiActivity extends Activity {
         io.execute(() -> {
             try {
                 JSONObject requestPayload = new JSONObject().put("messages", messages).put("mode", chatMode).put("web_search", webEnabled).put("deep_thinking", thinkEnabled);
-                if (!attachmentBase64.isEmpty()) requestPayload.put("attachments", new JSONArray().put(new JSONObject().put("name", attachmentName).put("mime", attachmentMime).put("data_base64", attachmentBase64)));
+                // AiTod4S3 funciona en esta versión únicamente como chat de texto.
                 JSONObject response = post("/api/ai/chat", token, requestPayload);
                 String reply = response.optString("reply", "");
                 if (reply.isEmpty()) throw new Exception("La IA devolvió una respuesta vacía.");
