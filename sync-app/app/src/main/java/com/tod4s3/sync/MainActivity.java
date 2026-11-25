@@ -8604,7 +8604,7 @@ public final class MainActivity extends ComponentActivity {
         HttpURLConnection c = (HttpURLConnection) new URL(API_BASE + path).openConnection();
         c.setRequestMethod(method);
         c.setConnectTimeout(15_000);
-        c.setReadTimeout("/api/app/ai/chat".equals(path) ? 90_000 : 30_000);
+        c.setReadTimeout("/api/app/ai/chat".equals(path) ? 45_000 : 30_000);
         c.setRequestProperty("Accept", "application/json");
         if (!bearer.isEmpty()) c.setRequestProperty("Authorization", "Bearer " + bearer);
         if (!body.isEmpty()) {

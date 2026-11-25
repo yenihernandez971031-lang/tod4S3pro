@@ -92,7 +92,7 @@ def _notrack_web_session_cookie() -> str:
     return cookie
 
 
-def _notrack_web_chat(prompt: str) -> str:
+def _notrack_web_chat(prompt: str, timeout_seconds: int = 45) -> str:
     """Usa el chat web anónimo de NoTrack como respaldo sin exponer una clave API."""
     with _NOTRACK_WEB_LOCK:
         cookie = _notrack_web_session_cookie()
@@ -112,7 +112,7 @@ def _notrack_web_chat(prompt: str) -> str:
         )
         chunks: list[str] = []
         final = ""
-        with urllib.request.urlopen(request, timeout=170) as response:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             if "event-stream" not in response.headers.get("Content-Type", ""):
                 raise RuntimeError("notrack_web_invalid_stream")
             for raw_line in response:
@@ -270,32 +270,16 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
                 _AI_REQUESTS_BY_USER.pop(oldest_user, None)
             _AI_DAILY_REQUESTS_BY_USER[user_id] = daily_user
 
-    request_messages = [{
-        "role": "system",
-        "content": (
-            "Eres AiTod4S3, un asistente general experto, claro y preciso. Responde en el idioma del usuario. "
-            "Sé conciso pero completo: incluye los datos relevantes y ve directo al punto. Usa listas cuando ayuden. "
-            "En cálculos, entrega el resultado y una fórmula breve; en conceptos, define y explica causas y consecuencias. "
-            "Si algo es incierto, dilo con honestidad; no finjas omnisciencia ni inventes datos. "
-            "También puedes ayudar con preguntas de soporte de la aplicación Android Tod4S3 Sync: actualización e instalación, "
-            "descargas, inicio de sesión y registro de ToDus, acceso Premium y problemas de AiTod4S3. Da pasos cortos, "
-            "seguros, numerados y reversibles; pide la versión de la app/Android y el texto exacto del error si hace falta. "
-            "No tienes acceso al teléfono, cuentas, compras ni al estado en tiempo real; nunca afirmes que ya los revisaste. "
-            "Para actualizaciones, recomienda usar el aviso integrado, mantener Internet estable, aceptar la confirmación "
-            "del instalador de Android y, solo si Android lo solicita, permitir la instalación para Tod4S3 Sync en Ajustes. "
-            "No indiques ni especules sobre proveedores, hosts o CDN de descarga. Nunca recomiendes desinstalar la app, "
-            "borrar sus datos ni instalar APKs de sitios externos como primera solución; la actualización integrada valida "
-            "el archivo antes de ofrecer la instalación. Para descargas, revisar conexión, espacio disponible y acceso a la "
-            "carpeta elegida, y luego reintentar; no prometas que todos los formatos o tamaños estén admitidos. Para el "
-            "registro ToDus, revisar que se use el número de la cuenta correcta y volver a solicitar el código si procede. "
-            "Para AiTod4S3, comprobar conexión, sesión vinculada y Premium activo/verificado; los límites del servicio "
-            "pueden causar esperas. Nunca pidas contraseñas, códigos de verificación, PIN, tokens, datos de pago ni recibos; "
-            "recuérdale al usuario que no los comparta. Si recomiendas enviar una captura del error, pide ocultar datos "
-            "personales. No reveles ni inventes detalles privados de repositorios, archivos, configuración o credenciales. "
-            + ("Razona con más profundidad antes de responder. " if deep_thinking else "Responde de forma directa y ágil. ")
-            + ("Prioriza la búsqueda web y cita fuentes si la herramienta está disponible. " if web_search else "")
-        ),
-    }, *clean_messages]
+    system_prompt = (
+        "Eres AiTod4S3. Responde en el idioma del usuario, con claridad, precisión y brevedad. "
+        "No inventes datos ni afirmes acceso a teléfonos, cuentas o información en tiempo real. "
+        "Nunca pidas contraseñas, códigos, PIN, tokens ni datos de pago. "
+        "Para soporte de Tod4S3, da pasos cortos, seguros y reversibles; pide versión y error exacto si faltan datos. "
+        "No reveles credenciales, configuración privada ni detalles internos del servidor. "
+        + ("Razona con más profundidad. " if deep_thinking else "Ve directo al punto. ")
+        + ("Si hay fuentes web disponibles, cita enlaces. " if web_search else "")
+    )
+    request_messages = [{"role": "system", "content": system_prompt}, *clean_messages]
     if not api_key_valid:
         fallback_prompt = "\n\n".join(
             f"{item['role'].upper()}: {item['content']}" for item in request_messages
@@ -308,8 +292,8 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
     request_body = json.dumps({
         "model": "notrack-uncensored",
         "messages": request_messages,
-        "max_tokens": 512,
-        "temperature": 0.7,
+        "max_tokens": 512 if deep_thinking else 320,
+        "temperature": 0.5 if deep_thinking else 0.4,
         "stream": False,
     }, separators=(",", ":")).encode("utf-8")
     outgoing = urllib.request.Request(
@@ -325,7 +309,7 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
     if not _AI_GATEWAY_SEMAPHORE.acquire(blocking=False):
         return {"ok": False, "error": "ai_busy"}, 429
     try:
-        with urllib.request.urlopen(outgoing, timeout=60) as response:
+        with urllib.request.urlopen(outgoing, timeout=60 if deep_thinking else 35) as response:
             provider_data = json.loads(response.read(1_000_000).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         provider_error_type = ""
@@ -785,7 +769,7 @@ def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[d
     request_body = json.dumps({
         "model": "notrack-uncensored",
         "messages": [{"role": "system", "content": system}, *clean],
-        "max_tokens": 512, "temperature": 0.7, "stream": False,
+        "max_tokens": 512 if deep_thinking else 320, "temperature": 0.5 if deep_thinking else 0.4, "stream": False,
     }, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         "https://api.notrack.ai/v1/chat/completions", data=request_body,
@@ -795,7 +779,7 @@ def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[d
     if not _AI_GATEWAY_SEMAPHORE.acquire(blocking=False):
         return {"ok": False, "error": "ai_busy"}, 429
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=60 if deep_thinking else 35) as response:
             provider_data = json.loads(response.read(1_000_000).decode("utf-8"))
     except urllib.error.HTTPError as exc:
         error = {401: "ai_provider_auth", 429: "ai_busy", 404: "ai_provider_endpoint",

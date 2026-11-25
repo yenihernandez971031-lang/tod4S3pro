@@ -577,7 +577,7 @@ public final class AiActivity extends Activity {
         HttpURLConnection connection = (HttpURLConnection) new URL(API + path).openConnection();
         connection.setRequestMethod("POST");
         connection.setConnectTimeout(20000);
-        connection.setReadTimeout(path.endsWith("/chat") ? 90000 : 30000);
+        connection.setReadTimeout(path.endsWith("/chat") ? 45000 : 30000);
         connection.setDoOutput(true);
         connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
         connection.setRequestProperty("Accept", "application/json");
