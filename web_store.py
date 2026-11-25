@@ -204,6 +204,9 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
     api_key_valid = (api_key.startswith("sk-notrack-") and len(api_key) >= 24
                      and not any(char.isspace() for char in api_key))
 
+    mode = str(body.get("mode", "fast") or "fast").strip().lower()
+    deep_thinking = bool(body.get("deep_thinking")) or mode in {"deep", "think", "thinking"}
+    web_search = bool(body.get("web_search"))
     messages = body.get("messages")
     if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
         return {"ok": False, "error": "invalid_messages"}, 400
@@ -282,7 +285,9 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
             "Para AiTod4S3, comprobar conexión, sesión vinculada y Premium activo/verificado; los límites del servicio "
             "pueden causar esperas. Nunca pidas contraseñas, códigos de verificación, PIN, tokens, datos de pago ni recibos; "
             "recuérdale al usuario que no los comparta. Si recomiendas enviar una captura del error, pide ocultar datos "
-            "personales. No reveles ni inventes detalles privados de repositorios, archivos, configuración o credenciales."
+            "personales. No reveles ni inventes detalles privados de repositorios, archivos, configuración o credenciales. "
+            + ("Razona con más profundidad antes de responder. " if deep_thinking else "Responde de forma directa y ágil. ")
+            + ("Prioriza la búsqueda web y cita fuentes si la herramienta está disponible. " if web_search else "")
         ),
     }, *clean_messages]
     if not api_key_valid:
@@ -729,7 +734,9 @@ def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[d
     system = (
         "Eres AiTod4S3, un asistente general experto, claro y preciso. Responde en el idioma del usuario. "
         "Sé directo y honesto; no inventes datos. Nunca solicites contraseñas, códigos, PIN, tokens ni datos de pago. "
-        "No afirmes tener acceso al teléfono, cuentas ni información en tiempo real."
+        "No afirmes tener acceso al teléfono, cuentas ni información en tiempo real. "
+        + ("Razona con más profundidad antes de responder. " if deep_thinking else "Responde de forma directa y ágil. ")
+        + ("Si hay fuentes disponibles, cita enlaces relevantes. " if web_search else "")
     )
     api_key = os.getenv("IASINCENSURA", "").strip()
     if not api_key.startswith("sk-notrack-") or len(api_key) < 24 or any(c.isspace() for c in api_key):

@@ -3,6 +3,9 @@ package com.tod4s3.ai;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.net.Uri;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -81,6 +84,14 @@ public final class AiActivity extends Activity {
     private ImageButton sendButton;
     private ImageButton callButton;
     private TextView menuButton;
+    private Button modeButton;
+    private TextView webTool;
+    private TextView thinkTool;
+    private TextView imageTool;
+    private String chatMode = "fast";
+    private boolean webEnabled = false;
+    private boolean thinkEnabled = false;
+    private boolean imageEnabled = false;
     private Switch speakSwitch;
     private SpeechRecognizer speechRecognizer;
     private Dialog voiceCallDialog;
@@ -176,9 +187,27 @@ public final class AiActivity extends Activity {
         statusParams.setMargins(0, dp(14), 0, 0);
         statusParams.gravity = Gravity.CENTER_HORIZONTAL;
         content.addView(status, statusParams);
-        TextView footer = label("Conexión cifrada  ·  ✦", 11, false, Color.rgb(121, 128, 147));
+        TextView community = label("Comunidad", 11, false, Color.rgb(121, 128, 147));
+        community.setGravity(Gravity.CENTER);
+        content.addView(community, margins(-1, -2, 0, 18, 0, 5));
+        LinearLayout telegram = new LinearLayout(this);
+        telegram.setGravity(Gravity.CENTER_VERTICAL);
+        telegram.setPadding(dp(12), dp(9), dp(12), dp(9));
+        telegram.setBackground(gradientRound(new int[]{Color.rgb(20, 55, 78), Color.rgb(18, 36, 55)}, 18));
+        TextView tgIcon = label("➤", 22, true, Color.WHITE); tgIcon.setGravity(Gravity.CENTER);
+        tgIcon.setBackground(round(Color.rgb(42, 171, 238), 22));
+        telegram.addView(tgIcon, lp(42, 42));
+        LinearLayout tgText = column();
+        tgText.addView(label("Canal de Telegram", 14, true, Color.WHITE));
+        tgText.addView(label("Novedades, anuncios y soporte", 11, false, Color.rgb(176, 204, 221)), margins(-1, -2, 0, 2, 0, 0));
+        telegram.addView(tgText, new LinearLayout.LayoutParams(0, -2, 1f));
+        TextView tgArrow = label("›", 28, false, Color.WHITE); tgArrow.setGravity(Gravity.CENTER);
+        telegram.addView(tgArrow, lp(28, 42));
+        telegram.setOnClickListener(v -> openTelegramChannel());
+        content.addView(telegram, new LinearLayout.LayoutParams(fieldWidth, dp(62)));
+        TextView footer = label("Conexión cifrada", 11, false, Color.rgb(121, 128, 147));
         footer.setGravity(Gravity.CENTER);
-        content.addView(footer, lp(-1, -2));
+        content.addView(footer, margins(-1, -2, 0, 10, 0, 0));
         FrameLayout.LayoutParams contentParams = new FrameLayout.LayoutParams(
                 Math.min(dp(390), getResources().getDisplayMetrics().widthPixels - dp(28)), -1, Gravity.CENTER);
         stage.addView(content, contentParams);
@@ -244,100 +273,81 @@ public final class AiActivity extends Activity {
         root = base();
         welcomePanel = null;
         LinearLayout page = column();
-        page.setPadding(dp(14), dp(12), dp(14), dp(10));
+        page.setPadding(dp(14), dp(10), dp(14), dp(10));
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        FrameLayout orb = createAiOrb(dp(34));
-        LinearLayout.LayoutParams orbParams = lp(34, 34);
-        orbParams.setMargins(0, 0, dp(10), 0);
-        header.addView(orb, orbParams);
-        LinearLayout identity = column();
-        identity.addView(label("AiTod4S3", 19, true, Color.WHITE), lp(-1, -2));
-        chatStatus = label("en línea", 12, true, Color.rgb(53, 224, 140));
-        identity.addView(chatStatus, lp(-1, -2));
-        header.addView(identity, new LinearLayout.LayoutParams(0, -2, 1f));
-        callButton = iconButton(R.drawable.ic_call_voice, Color.WHITE, "Iniciar llamada de voz con AiTod4S3");
-        callButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
-        callButton.setOnClickListener(v -> toggleVoiceCall());
-        header.addView(callButton, lp(42, 42));
-        menuButton = label("⋮", 27, true, Color.WHITE);
-        menuButton.setGravity(Gravity.CENTER); menuButton.setContentDescription("Opciones del chat");
+        menuButton = label("☰", 22, true, Color.WHITE);
+        menuButton.setGravity(Gravity.CENTER);
+        menuButton.setContentDescription("Abrir menú lateral");
         menuButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
-        menuButton.setOnClickListener(v -> showChatOptions(menuButton));
-        LinearLayout.LayoutParams menuParams = lp(42, 42); menuParams.setMargins(dp(7), 0, dp(7), 0);
-        header.addView(menuButton, menuParams);
-        Button logout = button("SALIR", PANEL);
-        logout.setTextSize(11);
-        logout.setBackground(roundStroke(PANEL, 14, Color.rgb(78, 82, 98)));
-        logout.setOnClickListener(v -> logout());
-        header.addView(logout, lp(74, 40));
-        page.addView(header, lp(-1, 48));
-        View line = new View(this);
-        line.setBackgroundColor(Color.rgb(52, 55, 68));
-        page.addView(line, lp(-1, 1));
-        scroll = new ScrollView(this);
-        scroll.setFillViewport(true);
-        scroll.setVerticalScrollBarEnabled(false);
-        transcript = column();
-        transcript.setPadding(dp(2), dp(12), dp(2), dp(14));
+        menuButton.setOnClickListener(v -> showSideMenu());
+        header.addView(menuButton, lp(42, 42));
+        modeButton = button("AiTod4S3 · Rápido⌄", Color.rgb(22, 24, 34));
+        modeButton.setTextSize(12); modeButton.setGravity(Gravity.CENTER);
+        modeButton.setBackground(roundStroke(Color.rgb(22, 24, 34), 16, Color.rgb(64, 68, 87)));
+        modeButton.setOnClickListener(v -> showModeSheet());
+        LinearLayout.LayoutParams modeParams = new LinearLayout.LayoutParams(0, dp(42), 1f);
+        modeParams.setMargins(dp(8), 0, dp(8), 0); header.addView(modeButton, modeParams);
+        callButton = iconButton(R.drawable.ic_call_voice, Color.WHITE, "Iniciar llamada de voz con AiTod4S3");
+        callButton.setBackground(roundStroke(Color.rgb(29,31,40),15,Color.rgb(78,82,98)));
+        callButton.setOnClickListener(v -> toggleVoiceCall());
+        header.addView(callButton, lp(42,42));
+        TextView newChat = label("✎", 20, true, Color.WHITE); newChat.setGravity(Gravity.CENTER);
+        newChat.setContentDescription("Nuevo chat"); newChat.setBackground(roundStroke(Color.rgb(29,31,40), 15, Color.rgb(78,82,98)));
+        newChat.setOnClickListener(v -> { history.clear(); saveHistory(); renderEmptyChat(); });
+        header.addView(newChat, lp(42, 42));
+        page.addView(header, margins(-1, 48, 0, 0, 0, 8));
+        scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setVerticalScrollBarEnabled(false);
+        transcript = column(); transcript.setPadding(dp(2), dp(12), dp(2), dp(14));
         scroll.addView(transcript, new ScrollView.LayoutParams(-1, -2));
         page.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
-        if (history.isEmpty()) addWelcomeState();
-        else for (JSONObject item : history) addBubble(item.optString("content", ""), "user".equals(item.optString("role")));
-        LinearLayout voiceRow = new LinearLayout(this);
-        voiceRow.setGravity(Gravity.CENTER_VERTICAL);
-        speakSwitch = new Switch(this);
-        speakSwitch.setText("La IA me habla");
-        speakSwitch.setTextColor(Color.rgb(190, 194, 207));
-        speakSwitch.setTextSize(13);
-        speakSwitch.setChecked(prefs.getBoolean("speak_enabled", false));
-        speakSwitch.setOnCheckedChangeListener((view, checked) -> {
-            prefs.edit().putBoolean("speak_enabled", checked).apply();
-            if (!checked && tts != null) tts.stop();
-        });
-        voiceRow.addView(speakSwitch, new LinearLayout.LayoutParams(0, dp(42), 1f));
-        TextView microphoneHint = label("Micrófono para dictar", 11, false, Color.rgb(134, 141, 160));
-        voiceRow.addView(microphoneHint, lp(-2, 42));
-        page.addView(voiceRow, lp(-1, 42));
-        FrameLayout composerShell = new FrameLayout(this);
-        composerShell.setPadding(dp(7), dp(6), dp(7), dp(6));
-        composerShell.setBackground(roundStroke(Color.rgb(11, 12, 18), 30, RED));
-        LinearLayout composerRow = new LinearLayout(this);
-        composerRow.setGravity(Gravity.CENTER_VERTICAL);
-        ImageView sparkle = new ImageView(this);
-        sparkle.setImageResource(R.drawable.ic_ai_sparkle);
-        sparkle.setColorFilter(RED);
-        composerRow.addView(sparkle, lp(22, 22));
-        composer = new EditText(this);
-        composer.setSingleLine(true);
-        composer.setHint("Pregúntale a AiTod4S3…");
-        composer.setTextColor(Color.rgb(244, 245, 249));
-        composer.setHintTextColor(Color.rgb(109, 115, 132));
-        composer.setTextSize(15);
-        composer.setPadding(dp(7), 0, dp(5), 0);
-        composer.setBackgroundColor(Color.TRANSPARENT);
-        composer.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(2500)});
-        composer.setImeOptions(EditorInfo.IME_ACTION_SEND);
-        composerRow.addView(composer, new LinearLayout.LayoutParams(0, dp(44), 1f));
-        ImageButton mic = iconButton(R.drawable.ic_mic, Color.WHITE, "Dictar mensaje por voz");
-        mic.setBackground(roundStroke(Color.rgb(31, 33, 42), 22, Color.argb(52, 255, 255, 255)));
-        mic.setOnClickListener(v -> beginDictation());
-        composerRow.addView(mic, lp(42, 42));
-        sendButton = iconButton(R.drawable.ic_send, Color.WHITE, "Enviar mensaje a AiTod4S3");
-        sendButton.setBackground(gradientRound(new int[]{RED, Color.rgb(193, 18, 46)}, 24));
-        sendButton.setOnClickListener(v -> sendMessage());
-        composerRow.addView(sendButton, lp(44, 44));
-        composerShell.addView(composerRow, new FrameLayout.LayoutParams(-1, -1));
-        page.addView(composerShell, lp(-1, -2));
-        composer.setOnEditorActionListener((view, actionId, event) -> {
-            if (actionId == EditorInfo.IME_ACTION_SEND) { sendMessage(); return true; }
-            return false;
-        });
-        composer.setOnFocusChangeListener((view, focused) -> {
-            if (focused) scroll.postDelayed(() -> scroll.fullScroll(View.FOCUS_DOWN), 180);
-        });
-        root.addView(page, new LinearLayout.LayoutParams(-1, 0, 1f));
+        if (history.isEmpty()) addWelcomeState(); else for (JSONObject item : history) addBubble(item.optString("content", ""), "user".equals(item.optString("role")));
+        LinearLayout tools = new LinearLayout(this); tools.setGravity(Gravity.CENTER_VERTICAL);
+        webTool = toolChip("◉  Web", false); thinkTool = toolChip("✦  Pensar", false); imageTool = toolChip("▧  Imagen", false);
+        tools.addView(webTool, new LinearLayout.LayoutParams(0, dp(34), 1f)); tools.addView(thinkTool, margins(0,34,5,0,5,0)); tools.addView(imageTool, new LinearLayout.LayoutParams(0, dp(34), 1f));
+        page.addView(tools, margins(-1, -2, 0, 4, 0, 2));
+        FrameLayout composerShell = new FrameLayout(this); composerShell.setPadding(dp(7), dp(6), dp(7), dp(6)); composerShell.setBackground(roundStroke(Color.rgb(11,12,18), 25, RED));
+        LinearLayout composerRow = new LinearLayout(this); composerRow.setGravity(Gravity.CENTER_VERTICAL);
+        TextView plus = label("+", 25, false, Color.WHITE); plus.setGravity(Gravity.CENTER); plus.setBackground(round(Color.rgb(32,35,48), 20)); plus.setOnClickListener(v -> showAttachmentSheet()); composerRow.addView(plus, lp(40,40));
+        composer = new EditText(this); composer.setSingleLine(false); composer.setMaxLines(5); composer.setHint("Pregúntale a AiTod4S3…"); composer.setTextColor(Color.rgb(244,245,249)); composer.setHintTextColor(Color.rgb(109,115,132)); composer.setTextSize(15); composer.setPadding(dp(7),0,dp(5),0); composer.setBackgroundColor(Color.TRANSPARENT); composer.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_MULTI_LINE); composer.setFilters(new InputFilter[]{new InputFilter.LengthFilter(5000)}); composer.setImeOptions(EditorInfo.IME_ACTION_SEND); composerRow.addView(composer, new LinearLayout.LayoutParams(0, dp(48), 1f));
+        ImageButton mic = iconButton(R.drawable.ic_mic, Color.WHITE, "Dictar mensaje por voz"); mic.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); mic.setOnClickListener(v -> beginDictation()); composerRow.addView(mic, lp(42,42));
+        sendButton = iconButton(R.drawable.ic_send, Color.WHITE, "Enviar mensaje a AiTod4S3"); sendButton.setBackground(gradientRound(new int[]{RED,Color.rgb(193,18,46)},24)); sendButton.setOnClickListener(v -> sendMessage()); composerRow.addView(sendButton, lp(44,44)); composerShell.addView(composerRow, new FrameLayout.LayoutParams(-1,-1)); page.addView(composerShell, lp(-1,-2));
+        composer.setOnEditorActionListener((view, actionId, event) -> { if (actionId == EditorInfo.IME_ACTION_SEND) { sendMessage(); return true; } return false; }); composer.setOnFocusChangeListener((view, focused) -> { if (focused) scroll.postDelayed(() -> scroll.fullScroll(View.FOCUS_DOWN), 180); });
+        root.addView(page, new LinearLayout.LayoutParams(-1,0,1f));
+    }
+
+    private TextView toolChip(String text, boolean active) {
+        TextView chip = label(text, 11, true, active ? Color.WHITE : Color.rgb(183,188,204));
+        chip.setGravity(Gravity.CENTER); chip.setPadding(dp(7),0,dp(7),0); chip.setBackground(roundStroke(active ? Color.rgb(47,50,68) : Color.rgb(19,21,30), 16, active ? RED : Color.rgb(57,61,78)));
+        chip.setOnClickListener(v -> { boolean on = v == webTool ? !webEnabled : v == thinkTool ? !thinkEnabled : !imageEnabled; if (v == webTool) webEnabled=on; else if (v == thinkTool) thinkEnabled=on; else imageEnabled=on; v.setBackground(roundStroke(on ? Color.rgb(47,50,68) : Color.rgb(19,21,30),16,on ? RED : Color.rgb(57,61,78))); });
+        return chip;
+    }
+    private void showModeSheet() {
+        LinearLayout panel=column(); panel.setPadding(dp(20),dp(18),dp(20),dp(12)); panel.setBackground(roundStroke(Color.rgb(18,20,28),20,Color.rgb(78,82,98)));
+        panel.addView(label("Modo de respuesta",18,true,Color.WHITE), margins(-1,-2,0,0,0,12));
+        TextView fast=label("Rápido\nRespuesta directa y ágil",14,true,Color.WHITE); fast.setPadding(dp(12),dp(10),dp(12),dp(10)); panel.addView(fast,lp(-1,58));
+        TextView deep=label("Pensar a fondo\nRazona más antes de responder",14,true,Color.WHITE); deep.setPadding(dp(12),dp(10),dp(12),dp(10)); panel.addView(deep,margins(-1,58,0,8,0,0));
+        Dialog d=new Dialog(this); d.setContentView(panel); d.show(); Window w=d.getWindow(); if(w!=null){w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));w.setLayout(Math.min(dp(340),getResources().getDisplayMetrics().widthPixels-dp(28)),WindowManager.LayoutParams.WRAP_CONTENT);}
+        fast.setOnClickListener(v->{chatMode="fast"; if(modeButton!=null)modeButton.setText("AiTod4S3 · Rápido⌄");d.dismiss();}); deep.setOnClickListener(v->{chatMode="deep";thinkEnabled=true;if(modeButton!=null)modeButton.setText("AiTod4S3 · Pensar a fondo⌄");d.dismiss();});
+    }
+    private void showAttachmentSheet() {
+        LinearLayout panel=column(); panel.setPadding(dp(20),dp(18),dp(20),dp(12)); panel.setBackground(roundStroke(Color.rgb(18,20,28),20,Color.rgb(78,82,98))); panel.addView(label("Adjuntar",18,true,Color.WHITE),margins(-1,-2,0,0,0,12));
+        for(String item:new String[]{"Cámara","Foto","Archivo"}){TextView row=label("＋  "+item,15,true,Color.WHITE);row.setGravity(Gravity.CENTER_VERTICAL);row.setPadding(dp(10),0,dp(10),0);panel.addView(row,lp(-1,50));row.setOnClickListener(v->{Intent pick=new Intent(Intent.ACTION_OPEN_DOCUMENT);pick.addCategory(Intent.CATEGORY_OPENABLE);pick.setType("Cámara".equals(item)?"image/*":"*/*");pick.putExtra(Intent.EXTRA_ALLOW_MULTIPLE,false);try{startActivityForResult(pick,31);}catch(Exception e){Toast.makeText(this,"No se pudo abrir el selector de archivos.",Toast.LENGTH_LONG).show();}});}
+        Dialog d=new Dialog(this);d.setContentView(panel);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));w.setLayout(Math.min(dp(330),getResources().getDisplayMetrics().widthPixels-dp(28)),WindowManager.LayoutParams.WRAP_CONTENT);}
+    }
+    private void showSideMenu() {
+        LinearLayout panel=column();panel.setPadding(dp(18),dp(20),dp(18),dp(14));panel.setBackground(roundStroke(Color.rgb(11,13,20),22,Color.rgb(55,59,78)));
+        LinearLayout brand=new LinearLayout(this);brand.setGravity(Gravity.CENTER_VERTICAL);brand.addView(createAiOrb(dp(42)),lp(42,42));brand.addView(label("AiTod4S3",20,true,Color.WHITE),margins(-1,-2,10,0,0,0));panel.addView(brand,lp(-1,48));
+        EditText search=edit("Buscar chats",InputType.TYPE_CLASS_TEXT);panel.addView(search,margins(-1,48,0,14,0,0));
+        Button fresh=button("✎  Nuevo chat",RED);fresh.setOnClickListener(v->{history.clear();saveHistory();renderEmptyChat();});panel.addView(fresh,lp(-1,50));
+        panel.addView(label("PROYECTOS",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8)); panel.addView(label("▱  Tod4S3 Sync",14,false,Color.WHITE),lp(-1,34)); panel.addView(label("▱  Bot de Telegram",14,false,Color.WHITE),lp(-1,34));
+        panel.addView(label("FIJADOS",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8)); panel.addView(label("⚑  Comando /anuncio",14,false,Color.WHITE),lp(-1,34));
+        panel.addView(label("HISTORIAL",11,true,Color.rgb(130,135,155)),margins(-1,-2,0,20,0,8)); panel.addView(label(history.isEmpty()?"Aún no hay conversaciones":"Conversación actual",14,false,Color.WHITE),lp(-1,34));
+        TextView tg=label("◉  Canal de Telegram   ›",14,true,Color.WHITE);tg.setPadding(dp(8),0,dp(8),0);tg.setGravity(Gravity.CENTER_VERTICAL);tg.setOnClickListener(v->openTelegramChannel());panel.addView(tg,margins(-1,48,0,16,0,0));
+        Dialog d=new Dialog(this);d.setContentView(panel);d.setCancelable(true);d.show();Window w=d.getWindow();if(w!=null){w.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));w.setLayout(Math.min(dp(360),getResources().getDisplayMetrics().widthPixels-dp(20)),WindowManager.LayoutParams.MATCH_PARENT);}
+    }
+    private void openTelegramChannel(){
+        String url="https://t.me/Dark_Zone_666"; try{Intent app=new Intent(Intent.ACTION_VIEW, Uri.parse(url));app.setPackage("org.telegram.messenger");startActivity(app);}catch(Exception ignored){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(Exception e){Toast.makeText(this,"No se pudo abrir el canal de Telegram.",Toast.LENGTH_LONG).show();}}
     }
 
     private void sendMessage() {
@@ -364,7 +374,7 @@ public final class AiActivity extends Activity {
         for (int i = from; i < history.size(); i++) messages.put(history.get(i));
         io.execute(() -> {
             try {
-                JSONObject response = post("/api/ai/chat", token, new JSONObject().put("messages", messages));
+                JSONObject response = post("/api/ai/chat", token, new JSONObject().put("messages", messages).put("mode", chatMode).put("web_search", webEnabled).put("deep_thinking", thinkEnabled));
                 String reply = response.optString("reply", "");
                 if (reply.isEmpty()) throw new Exception("La IA devolvió una respuesta vacía.");
                 runOnUiThread(() -> {
@@ -464,6 +474,12 @@ public final class AiActivity extends Activity {
 
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == 31 && result == RESULT_OK && data != null && data.getData() != null) {
+            imageEnabled = true;
+            if (imageTool != null) { imageTool.setText("▧  Archivo listo"); imageTool.setBackground(roundStroke(Color.rgb(47,50,68),16,RED)); }
+            Toast.makeText(this, "Adjunto listo: " + data.getData().getLastPathSegment(), Toast.LENGTH_SHORT).show();
+            return;
+        }
         if (request == 17 && result == RESULT_OK && data != null) {
             ArrayList<String> results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
             if (results != null && !results.isEmpty() && composer != null) {
@@ -549,15 +565,15 @@ public final class AiActivity extends Activity {
 
         FrameLayout orb = createAiOrb(dp(96));
         welcomePanel.addView(orb, lp(96, 96));
-        TextView title = label("Hola, soy AiTod4S3", 26, true, Color.WHITE);
+        TextView title = label("Hola, " + (username.isEmpty() ? "" : username) + ".\n¿En qué te ayudo hoy?", 25, true, Color.WHITE);
         title.setGravity(Gravity.CENTER);
         welcomePanel.addView(title, margins(-1, -2, 0, 16, 0, 4));
-        TextView subtitle = label("Tu asistente inteligente, listo para ayudarte", 14, false, Color.rgb(170, 176, 194));
+        TextView subtitle = label("Tu asistente inteligente", 14, false, Color.rgb(170, 176, 194));
         subtitle.setGravity(Gravity.CENTER);
         welcomePanel.addView(subtitle, margins(-1, -2, 0, 0, 0, 20));
 
-        String[] titles = {"Explícame algo", "Ayúdame a escribir", "Resume un tema", "Dame ideas"};
-        String[] hints = {"Responde con claridad", "Un mensaje o un texto", "Lo esencial, paso a paso", "Empecemos una lluvia de ideas"};
+        String[] titles = {"Escribir un texto", "Ayuda con código", "Analizar una foto", "Buscar en la web"};
+        String[] hints = {"Redacta desde cero", "Soluciona y explica", "Sube una imagen", "Encuentra fuentes"};
         String[] prompts = {
                 "Explícame de forma sencilla un tema que te indique.",
                 "Ayúdame a redactar un mensaje claro y natural.",
@@ -649,6 +665,14 @@ public final class AiActivity extends Activity {
             TextView body = label(text, 15, false, Color.rgb(233, 235, 243));
             body.setLineSpacing(dp(5), 1f);
             answer.addView(body, margins(-1, -2, 0, 8, 0, 0));
+            LinearLayout actions = new LinearLayout(this); actions.setGravity(Gravity.CENTER_VERTICAL);
+            TextView copy = label("Copiar", 11, true, Color.rgb(150,156,177)); copy.setPadding(dp(7),0,dp(7),0);
+            copy.setOnClickListener(v -> { ClipboardManager cb=(ClipboardManager)getSystemService(CLIPBOARD_SERVICE); if(cb!=null) cb.setPrimaryClip(ClipData.newPlainText("AiTod4S3", text)); Toast.makeText(this,"Respuesta copiada",Toast.LENGTH_SHORT).show(); }); actions.addView(copy, lp(-2,30));
+            TextView like = label("Me gusta", 11, true, Color.rgb(150,156,177)); like.setPadding(dp(7),0,dp(7),0); like.setOnClickListener(v->Toast.makeText(this,"Valoración guardada",Toast.LENGTH_SHORT).show()); actions.addView(like,lp(-2,30));
+            TextView dislike = label("No me gusta", 11, true, Color.rgb(150,156,177)); dislike.setPadding(dp(7),0,dp(7),0); dislike.setOnClickListener(v->Toast.makeText(this,"Valoración guardada",Toast.LENGTH_SHORT).show()); actions.addView(dislike,lp(-2,30));
+            TextView regen = label("Regenerar", 11, true, Color.rgb(150,156,177)); regen.setPadding(dp(7),0,dp(7),0); regen.setOnClickListener(v->{ if(!history.isEmpty()){ history.remove(history.size()-1); String prompt=history.isEmpty()?"":history.get(history.size()-1).optString("content",""); saveHistory(); showChat(); if(composer!=null){composer.setText(prompt); sendMessage();} }}); actions.addView(regen,lp(-2,30));
+            TextView speak = label("Leer", 11, true, Color.rgb(150,156,177)); speak.setPadding(dp(7),0,dp(7),0); speak.setOnClickListener(v->{ensureTts(); if(tts!=null)tts.speak(text,TextToSpeech.QUEUE_FLUSH,null,"aitod4s3-action");}); actions.addView(speak,lp(-2,30));
+            answer.addView(actions, margins(-1, -2, 0, 0, 0, 0));
             transcript.addView(answer, margins(-1, -2, 3, 5, 3, 13));
         }
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
@@ -772,6 +796,10 @@ public final class AiActivity extends Activity {
         if (voiceCallDialog != null) { voiceCallDialog.dismiss(); voiceCallDialog = null; }
         voiceCallOrb = null; voiceCallStatus = null;
         if (callButton != null) callButton.setBackground(roundStroke(Color.rgb(29, 31, 40), 15, Color.rgb(78, 82, 98)));
+    }
+
+    private void ensureTts() {
+        if (tts == null) tts = new TextToSpeech(this, result -> { if (result == TextToSpeech.SUCCESS) { tts.setLanguage(new Locale("es", "ES")); ttsReady = true; } });
     }
 
     private void postDelayed(Runnable action, long delay) { getWindow().getDecorView().postDelayed(action, delay); }
