@@ -207,6 +207,9 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
     mode = str(body.get("mode", "fast") or "fast").strip().lower()
     deep_thinking = bool(body.get("deep_thinking")) or mode in {"deep", "think", "thinking"}
     web_search = bool(body.get("web_search"))
+    attachments = _validated_ai_attachments(body)
+    if attachments is None:
+        return {"ok": False, "error": "invalid_attachments"}, 400
     messages = body.get("messages")
     if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
         return {"ok": False, "error": "invalid_messages"}, 400
@@ -225,6 +228,9 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
         if total_chars > 16000:
             return {"ok": False, "error": "conversation_too_long"}, 413
         clean_messages.append({"role": item["role"], "content": content})
+    if attachments:
+        note = "\nAdjuntos recibidos: " + ", ".join(f"{item['name']} ({item['mime']})" for item in attachments)
+        clean_messages[-1]["content"] = (clean_messages[-1]["content"] + note)[:4000]
     if clean_messages[-1]["role"] != "user":
         return {"ok": False, "error": "invalid_messages"}, 400
 
@@ -684,8 +690,33 @@ def _dispatch_app_task(token: str, action: str, payload: dict) -> tuple[dict, in
     return result
 
 
+def _validated_ai_attachments(body: dict) -> list[dict[str, str]] | None:
+    raw = body.get("attachments", [])
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 3:
+        return None
+    result: list[dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None
+        name = str(item.get("name", "")).strip()[:180]
+        mime = str(item.get("mime", "application/octet-stream")).strip().lower()[:120]
+        data = str(item.get("data_base64", "")).strip()
+        if not name or not data or len(data) > 2_800_000 or ";" in mime or not mime:
+            return None
+        result.append({"name": name, "mime": mime, "data_base64": data})
+    return result
+
+
 def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[dict, int]:
     """AiTod4S3 standalone account chat; intentionally independent of app Premium."""
+    mode = str(body.get("mode", "fast") or "fast").strip().lower()
+    deep_thinking = bool(body.get("deep_thinking")) or mode in {"deep", "think", "thinking"}
+    web_search = bool(body.get("web_search"))
+    attachments = _validated_ai_attachments(body)
+    if attachments is None:
+        return {"ok": False, "error": "invalid_attachments"}, 400
     try:
         username = ai_auth.resolve_session(token, device_id)
     except RuntimeError:
@@ -708,6 +739,9 @@ def _dispatch_ai_account_chat(token: str, body: dict, device_id: str) -> tuple[d
         if total > 16000:
             return {"ok": False, "error": "conversation_too_long"}, 413
         clean.append({"role": item["role"], "content": content})
+    if attachments:
+        note = "\nAdjuntos recibidos: " + ", ".join(f"{item['name']} ({item['mime']})" for item in attachments)
+        clean[-1]["content"] = (clean[-1]["content"] + note)[:4000]
     if clean[-1]["role"] != "user":
         return {"ok": False, "error": "invalid_messages"}, 400
     now = time.monotonic()

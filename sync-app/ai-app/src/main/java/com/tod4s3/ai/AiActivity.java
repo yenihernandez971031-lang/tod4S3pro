@@ -6,6 +6,9 @@ import android.content.Intent;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.net.Uri;
+import android.database.Cursor;
+import android.provider.OpenableColumns;
+import android.util.Base64;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -92,6 +95,11 @@ public final class AiActivity extends Activity {
     private boolean webEnabled = false;
     private boolean thinkEnabled = false;
     private boolean imageEnabled = false;
+    private Uri pendingAttachmentUri;
+    private String pendingAttachmentName = "";
+    private String pendingAttachmentMime = "";
+    private String pendingAttachmentBase64 = "";
+    private TextView attachmentChip;
     private Switch speakSwitch;
     private SpeechRecognizer speechRecognizer;
     private Dialog voiceCallDialog;
@@ -306,6 +314,11 @@ public final class AiActivity extends Activity {
         webTool = toolChip("◉  Web", false); thinkTool = toolChip("✦  Pensar", false); imageTool = toolChip("▧  Imagen", false);
         tools.addView(webTool, new LinearLayout.LayoutParams(0, dp(34), 1f)); tools.addView(thinkTool, margins(0,34,5,0,5,0)); tools.addView(imageTool, new LinearLayout.LayoutParams(0, dp(34), 1f));
         page.addView(tools, margins(-1, -2, 0, 4, 0, 2));
+        attachmentChip = label("", 11, true, Color.rgb(220,225,238));
+        attachmentChip.setVisibility(View.GONE); attachmentChip.setPadding(dp(10),0,dp(10),0);
+        attachmentChip.setBackground(roundStroke(Color.rgb(27,30,42),14,Color.rgb(68,72,94)));
+        attachmentChip.setOnClickListener(v -> clearAttachment());
+        page.addView(attachmentChip, margins(-1,32,0,0,0,4));
         FrameLayout composerShell = new FrameLayout(this); composerShell.setPadding(dp(7), dp(6), dp(7), dp(6)); composerShell.setBackground(roundStroke(Color.rgb(11,12,18), 25, RED));
         LinearLayout composerRow = new LinearLayout(this); composerRow.setGravity(Gravity.CENTER_VERTICAL);
         TextView plus = label("+", 25, false, Color.WHITE); plus.setGravity(Gravity.CENTER); plus.setBackground(round(Color.rgb(32,35,48), 20)); plus.setOnClickListener(v -> showAttachmentSheet()); composerRow.addView(plus, lp(40,40));
@@ -350,11 +363,34 @@ public final class AiActivity extends Activity {
         String url="https://t.me/Dark_Zone_666"; try{Intent app=new Intent(Intent.ACTION_VIEW, Uri.parse(url));app.setPackage("org.telegram.messenger");startActivity(app);}catch(Exception ignored){try{startActivity(new Intent(Intent.ACTION_VIEW,Uri.parse(url)));}catch(Exception e){Toast.makeText(this,"No se pudo abrir el canal de Telegram.",Toast.LENGTH_LONG).show();}}
     }
 
+    private void prepareAttachment(Uri uri) {
+        try {
+            String mime = getContentResolver().getType(uri);
+            if (mime == null) mime = "application/octet-stream";
+            long size = 0; String name = uri.getLastPathSegment();
+            try (Cursor c = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE}, null, null, null)) {
+                if (c != null && c.moveToFirst()) { int ni=c.getColumnIndex(OpenableColumns.DISPLAY_NAME); int si=c.getColumnIndex(OpenableColumns.SIZE); if(ni>=0)name=c.getString(ni); if(si>=0 && !c.isNull(si))size=c.getLong(si); }
+            }
+            if (size > 2_000_000L) { Toast.makeText(this,"El archivo supera el máximo de 2 MB.",Toast.LENGTH_LONG).show(); return; }
+            java.io.InputStream in=getContentResolver().openInputStream(uri); if(in==null) throw new Exception("open");
+            java.io.ByteArrayOutputStream out=new java.io.ByteArrayOutputStream(); byte[] buffer=new byte[8192]; int n; while((n=in.read(buffer))!=-1){out.write(buffer,0,n);if(out.size()>2_000_000)throw new Exception("large");} in.close();
+            pendingAttachmentUri=uri; pendingAttachmentName=name==null?"archivo":name; pendingAttachmentMime=mime; pendingAttachmentBase64=Base64.encodeToString(out.toByteArray(),Base64.NO_WRAP); imageEnabled=mime.startsWith("image/");
+            if(imageTool!=null){imageTool.setText("▧  Imagen".equals(imageTool.getText())?"▧  Imagen lista":"▧  Archivo listo"); imageTool.setBackground(roundStroke(Color.rgb(47,50,68),16,RED));}
+            if(attachmentChip!=null){attachmentChip.setText("Adjunto: "+pendingAttachmentName+"  ·  Toca para quitar");attachmentChip.setVisibility(View.VISIBLE);}
+            Toast.makeText(this,"Adjunto listo para enviar.",Toast.LENGTH_SHORT).show();
+        } catch(Exception e){Toast.makeText(this,"No se pudo leer el archivo o supera 2 MB.",Toast.LENGTH_LONG).show();}
+    }
+    private void clearAttachment(){ pendingAttachmentUri=null;pendingAttachmentName="";pendingAttachmentMime="";pendingAttachmentBase64="";if(attachmentChip!=null)attachmentChip.setVisibility(View.GONE);if(imageTool!=null){imageTool.setText("▧  Imagen");imageTool.setBackground(roundStroke(Color.rgb(19,21,30),16,Color.rgb(57,61,78)));} }
+
     private void sendMessage() {
         if (sending || composer == null) return;
         String text = composer.getText().toString().trim();
-        if (text.isEmpty()) return;
+        if (text.isEmpty() && pendingAttachmentBase64.isEmpty()) return;
+        final String attachmentName = pendingAttachmentName;
+        final String attachmentMime = pendingAttachmentMime;
+        final String attachmentBase64 = pendingAttachmentBase64;
         composer.setText("");
+        clearAttachment();
         if (welcomePanel != null && welcomePanel.getParent() == transcript) {
             transcript.removeView(welcomePanel);
             welcomePanel = null;
@@ -374,7 +410,9 @@ public final class AiActivity extends Activity {
         for (int i = from; i < history.size(); i++) messages.put(history.get(i));
         io.execute(() -> {
             try {
-                JSONObject response = post("/api/ai/chat", token, new JSONObject().put("messages", messages).put("mode", chatMode).put("web_search", webEnabled).put("deep_thinking", thinkEnabled));
+                JSONObject requestPayload = new JSONObject().put("messages", messages).put("mode", chatMode).put("web_search", webEnabled).put("deep_thinking", thinkEnabled);
+                if (!attachmentBase64.isEmpty()) requestPayload.put("attachments", new JSONArray().put(new JSONObject().put("name", attachmentName).put("mime", attachmentMime).put("data_base64", attachmentBase64)));
+                JSONObject response = post("/api/ai/chat", token, requestPayload);
                 String reply = response.optString("reply", "");
                 if (reply.isEmpty()) throw new Exception("La IA devolvió una respuesta vacía.");
                 runOnUiThread(() -> {
@@ -475,9 +513,7 @@ public final class AiActivity extends Activity {
     @Override protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == 31 && result == RESULT_OK && data != null && data.getData() != null) {
-            imageEnabled = true;
-            if (imageTool != null) { imageTool.setText("▧  Archivo listo"); imageTool.setBackground(roundStroke(Color.rgb(47,50,68),16,RED)); }
-            Toast.makeText(this, "Adjunto listo: " + data.getData().getLastPathSegment(), Toast.LENGTH_SHORT).show();
+            prepareAttachment(data.getData());
             return;
         }
         if (request == 17 && result == RESULT_OK && data != null) {
