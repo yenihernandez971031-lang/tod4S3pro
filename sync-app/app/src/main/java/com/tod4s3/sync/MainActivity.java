@@ -3973,13 +3973,10 @@ public final class MainActivity extends ComponentActivity {
         addDrawerSectionHeader(rows, "Planes y archivos");
         addDrawerRow(rows, null, "", "Planes y ofertas", "Ver opciones y precios", () -> showPlansStep(true));
         addDrawerRow(rows, null, "", "Archivos de ToDus", "Entregas del bot", () -> showDashboard("all", true));
-        addDrawerRow(rows, null, "", "Vaciar mi nube", "Eliminar entregas remotas", () ->
-                Toast.makeText(this, "Selecciona “Eliminar nube” en cada entrega para confirmar la eliminación.", Toast.LENGTH_LONG).show());
         addDrawerRow(rows, null, "", "Descargas", "Archivos guardados en el teléfono", () -> showDashboard("completed", true));
 
         addDrawerSectionHeader(rows, "Actividad");
         addDrawerRow(rows, null, "", "Historial de transferencias", "Entregas y descargas anteriores", () -> showDashboard("completed", true));
-        addDrawerRow(rows, null, "", "Velocidad de red en pantalla", "Mostrar u ocultar el indicador", () -> showSettings(true));
         addDrawerRow(rows, null, "", "Estadísticas", "Uso y actividad", () -> showStats(true));
         if (token != null && !token.isEmpty()) addDrawerRow(rows, null, "", "Registros de la app", "Consultar actividad y errores", () -> showAppLogs(true));
 
