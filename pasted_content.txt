@@ -1,0 +1,90 @@
+Aquí tienes el super prompt. No menciona ningún repositorio ni el nombre de la app, y donde hace falta usa marcadores entre corchetes para que los completes tú. Adjúntale la imagen **AiTod4S3-rediseno-moderno.png** junto con el texto.
+
+---
+
+**SUPER PROMPT: rediseño moderno de la app de IA con todas sus funciones**
+
+Adjunto una imagen de referencia con cuatro pantallas y una lista numerada de funciones. Tu tarea es **implementar ese diseño en la aplicación de IA existente, de modo que se vea exactamente igual a la imagen y que todas las funciones trabajen de verdad, sin errores**. No es un maqueta: cada botón, cada animación y cada función debe estar conectada y funcionando.
+
+Antes de escribir código, **estudia el proyecto actual**: cómo está construida la interfaz, cómo funciona el inicio de sesión y las cuentas, cómo se comunica la app con la IA y con el servidor, y cómo se actualiza la app. Reutiliza lo que ya existe y **no rompas nada que hoy funcione**, en especial el inicio de sesión, el sistema de cuentas creadas por el administrador, el chat actual y el mecanismo de actualización.
+
+**1. Sistema de diseño (aplícalo en todas las pantallas)**
+- Tema oscuro. Fondos: pantalla del chat `#0b0d14`, login `#07080d`.
+- Tarjetas y campos: `#141622`, bordes `#23263a` y `#2c2f40`.
+- Acento rojo `#F21E3A`; degradado de botones principales de `#ff3d57` a `#d41a38`, con resplandor rojo suave.
+- Orbe de la IA: esfera con degradado radial de `#ffc067` a `#f2762a` y `#e5334a`, borde dorado translúcido, brillo exterior naranja y una estrella de cuatro puntas blanca en el centro. Es **un único componente reutilizable** en todas las pantallas (login, inicio, avatar del chat, llamada y menú).
+- Colores de apoyo: verde de estado `#4be09a`, ámbar `#f5a524`, azul de Telegram `#2AABEE`.
+- Esquinas: campos 18 dp, botones 15 dp, compositor 24 dp, tarjetas de sugerencias 16 dp, chips 16 dp.
+- Tipografía sans moderna, con títulos en negrita y textos secundarios en gris `#9a9aa6`.
+- Iconos de línea consistentes (trazo de 2 dp, extremos redondeados). Sin emojis en la interfaz.
+- Respeta las barras del sistema (estado y navegación) y los márgenes seguros en cualquier tamaño de pantalla.
+
+**2. Pantalla de inicio de sesión**
+- Chip "IA en línea" arriba: cápsula con borde verde, punto verde parpadeante.
+- Orbe grande con anillos concéntricos finos y puntos (rojo, dorado, azul) que giran en órbita, y destellos que titilan. Fondo con constelación sutil de puntos y líneas finas, y resplandor rojo oscuro detrás del orbe. El orbe "respira".
+- Título en negrita grande, subtítulo "Tu asistente inteligente".
+- Campo **Usuario** y campo **Contraseña** de estilo cristal: círculo con icono a la izquierda, etiqueta pequeña arriba, borde con degradado rojo-oro y brillo cuando está activo, cursor parpadeante. En contraseña, **ojo para mostrar u ocultar** que realmente funcione.
+- Botón "INICIAR SESIÓN" con flecha, degradado rojo, resplandor y efecto de pulsación; botón secundario "CREAR CUENTA +" oscuro; tarjeta con candado y el texto de acceso por cuenta creada por el administrador; texto "Conexión cifrada".
+- **Botón del canal de Telegram, anclado abajo**, separado por una línea con el texto "Comunidad": tarjeta redondeada de fondo azul oscuro con degradado, círculo azul de Telegram con icono de avión de papel, título "Canal de Telegram", descripción "Novedades, anuncios y soporte" y flecha a la derecha. Al tocarlo abre el canal en la app de Telegram y, si no está instalada, en el navegador. Enlace del canal: **[PEGA AQUÍ EL ENLACE DE TU CANAL]**. Efecto de pulsación y manejo de error si no se puede abrir.
+- Animaciones: órbitas girando, destellos titilando, orbe respirando. Al fallar el login, el orbe tiembla y los campos muestran el error en rojo. Mientras valida, el botón muestra un indicador de carga.
+- Se mantiene intacta toda la lógica de autenticación actual.
+
+**3. Pantalla de inicio del chat**
+- Cabecera: botón de menú a la izquierda, **selector de modo** al centro con flecha y botón de nuevo chat a la derecha.
+- El selector abre una hoja inferior con **"Rápido"** y **"Pensar a fondo"**. El modo elegido cambia de verdad el comportamiento de la IA: Rápido responde directo y Pensar a fondo razona más antes de responder y muestra el tiempo que tardó.
+- Orbe de 84 dp centrado y saludo con el nombre del usuario: "Hola, [nombre]. ¿En qué te ayudo hoy?".
+- Cuatro **tarjetas de sugerencias** en cuadrícula de 2x2: escribir un texto, ayuda con código, analizar una foto y buscar en la web. Al tocar una, se inicia el chat con esa intención (por ejemplo, la de foto abre el selector de imagen y la de web activa la búsqueda).
+- Fila de **herramientas** sobre el compositor: Web, Pensar e Imagen, como chips que se activan y desactivan con estado visible.
+- **Compositor** con borde rojo: texto "Pregúntale a [NOMBRE DE LA IA]...", botón **+** a la izquierda, micrófono y botón de enviar a la derecha. Crece en altura al escribir varias líneas.
+- Botón **+**: hoja inferior con Cámara, Foto y Archivo. Las fotos y archivos se adjuntan de verdad, se muestran como chip con miniatura y botón X sobre el compositor, y se envían a la IA (con análisis de imagen si el modelo lo permite). Valida tipos y tamaño máximo, con mensajes de error claros.
+
+**4. Pantalla de conversación**
+- Cabecera con menú, título del chat con estado "en línea" y **botón de llamada de voz**.
+- Mensaje del usuario: burbuja a la derecha con degradado rojo y esquinas redondeadas.
+- Respuesta de la IA sin burbuja, precedida por el avatar con el orbe pequeño y el nombre.
+- **Respuesta en streaming**: el texto aparece mientras se genera, con desplazamiento automático. Mientras responde, el botón de enviar se convierte en **botón de detener** que cancela la generación.
+- Chip desplegable **"Pensó a fondo · 4 s"** cuando se usa ese modo, que al tocarlo muestra u oculta el razonamiento.
+- **Renderizado completo de markdown**: negritas, listas, enlaces, citas, tablas y títulos.
+- **Bloques de código** con barra superior (nombre del lenguaje y botón **Copiar** que copia de verdad y muestra confirmación), fondo `#07080d`, tipografía monoespaciada y **colores de sintaxis** (palabras clave en rosa, textos en verde, funciones en ámbar).
+- **Fuentes de la búsqueda web**: cuando la herramienta Web está activa, la IA busca en internet de verdad y muestra debajo de la respuesta los enlaces citados como chips, que abren la página al tocarlos.
+- **Fila de acciones** bajo cada respuesta: copiar, me gusta, no me gusta (guardar la valoración), **regenerar** y **leer en voz alta** (voz del sistema con opción de pausar).
+- Chip del archivo adjunto sobre el compositor mientras se envía.
+
+**5. Llamada de voz y dictado**
+- El botón de llamada abre un modo de voz a pantalla completa con el orbe grande, que **reacciona al audio**: crece y ondula al hablar la IA, tiene estado distinto al escuchar y al pensar.
+- Reconocimiento de voz real con solicitud del permiso de micrófono de Android, mensaje claro si se niega, y respuesta hablada de la IA. Botones para silenciar y colgar.
+- El micrófono del compositor dicta texto de verdad, con indicador visible de que está escuchando.
+
+**6. Menú lateral**
+- Se abre con el botón de menú y con un gesto desde el borde izquierdo.
+- Cabecera con el orbe y el nombre; **buscador de chats** que filtra en vivo; botón rojo **"Nuevo chat"**.
+- Secciones: **Proyectos**, **Fijados**, y chats agrupados en **Hoy**, **Ayer** y **Anteriores**. El chat activo aparece resaltado.
+- **Historial real y persistente**: cada conversación se guarda en la cuenta del usuario (base de datos local y sincronización con el servidor) y se restaura al volver a abrir la app. Pulsación larga o deslizar en un chat para fijar, renombrar o eliminar (con confirmación). Títulos de chat generados automáticamente.
+- **Proyectos**: carpetas que agrupan chats; crear, renombrar y mover chats a un proyecto.
+- Sección **Conectores**:
+  - **GitHub**: conexión con token guardado de forma segura (almacenamiento cifrado de Android, nunca en texto plano ni en registros), estado "Conectado" en verde, y la IA puede leer y editar archivos de los repositorios que el usuario autorice. **Pide siempre confirmación explícita antes de aplicar cualquier cambio o commit.** Opción de desconectar.
+  - **Canal de Telegram**: fila que abre el canal con el mismo enlace del login.
+- Pie con avatar del usuario, nombre, plan y botón de ajustes. Los ajustes incluyen voz de la IA, sonidos, borrar historial y cerrar sesión.
+
+**7. Animaciones y fluidez**
+- Entrada suave de las pantallas y transiciones entre ellas; el orbe sube y se ajusta de forma fluida al pasar del login al chat.
+- Orbe respirando, órbitas girando, destellos titilando, indicador de "pensando" y efecto de escritura en vivo.
+- Todo a 60 fps, sin tirones, sin bloquear el hilo principal. Las operaciones de red y de base de datos van en segundo plano.
+
+**8. Calidad: que funcione todo sin errores**
+- La app **no debe cerrarse ni mostrar pantallas rotas** en ningún caso: sin conexión, respuesta inválida, servidor caído, permisos denegados, archivos no válidos o llamadas canceladas deben mostrar un mensaje claro en español y permitir reintentar.
+- Maneja correctamente la rotación, el cambio de tamaño de pantalla, la app en segundo plano y la pérdida de conexión durante una respuesta.
+- Nunca expongas claves, tokens ni datos privados en pantalla, registros ni código.
+- Escribe pruebas para la lógica nueva (historial, adjuntos, modos, conectores) y ejecútalas.
+- Compila la app y confirma que no hay errores ni advertencias nuevas.
+- **Prueba cada función de punta a punta** como lo haría un usuario real: iniciar sesión, abrir el canal de Telegram, cambiar de modo, adjuntar foto y archivo, buscar en la web y abrir una fuente, copiar código, regenerar, leer en voz alta, dictar, llamada de voz, crear, buscar, fijar, renombrar y borrar chats, conectar GitHub y confirmar un cambio.
+- **Verificación visual**: compara capturas de cada pantalla de la app con la imagen de referencia, corrige cualquier diferencia de colores, espaciados, tamaños, iconos y textos, y repite hasta que quede exactamente igual. Revisa también en pantallas pequeñas y grandes.
+
+**9. Entrega**
+- Sube la nueva versión con el número siguiente al actual, con el APK firmado, y usa el mecanismo de actualización que ya tiene la app para que los usuarios se actualicen solos.
+- Actualiza la documentación del proyecto con las funciones nuevas.
+- Al terminar, entrégame un resumen de lo que cambiaste, una lista de lo que probaste y su resultado, y confirma que todo quedó funcionando y publicado. Si algo no se pudo hacer exactamente como en la imagen, dímelo claramente y explica por qué.
+
+---
+
+Antes de pegarlo, solo tienes que sustituir **[PEGA AQUÍ EL ENLACE DE TU CANAL]** por el enlace real y mencionar aparte el nombre de la app y el repositorio, como dijiste.
