@@ -48,10 +48,94 @@ _NIKUDARIA_CLIENT_ID_RE = re.compile(
 _NIKUDARIA_RECENT_REQUESTS: dict[str, list[float]] = {}
 _NIKUDARIA_DAILY_REQUESTS: dict[str, list[float]] = {}
 _AI_GATEWAY_SEMAPHORE = BoundedSemaphore(2)
+_NOTRACK_WEB_LOCK = Lock()
+_NOTRACK_WEB_UA = "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/130 Mobile Safari/537.36"
+_NOTRACK_WEB_SESSION_FILE = os.getenv("NOTRACK_WEB_SESSION_FILE", "/data/notrack_web_session.json")
 _AI_ACCOUNT_RATE_LOCK = Lock()
 _AI_ACCOUNT_REQUESTS: dict[str, list[float]] = {}
 _AI_ACCOUNT_DAILY_REQUESTS: dict[str, list[float]] = {}
 _AI_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+
+
+def _notrack_web_session_cookie() -> str:
+    """Obtiene o conserva la cookie uid usada por el chat web anónimo de NoTrack."""
+    path = Path(_NOTRACK_WEB_SESSION_FILE)
+    try:
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        cookie = str(saved.get("uid", "")).strip() if isinstance(saved, dict) else ""
+        if cookie:
+            return cookie
+    except (OSError, ValueError, TypeError):
+        pass
+    request = urllib.request.Request(
+        "https://notrack.ai/es/chat",
+        headers={"User-Agent": _NOTRACK_WEB_UA, "Accept": "text/html"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        cookies = response.headers.get_all("Set-Cookie") or []
+    cookie = ""
+    for header in cookies:
+        match = re.search(r"(?:^|[,;\s])uid=([^;,\s]+)", header)
+        if match:
+            cookie = match.group(1)
+            break
+    if not cookie:
+        raise RuntimeError("notrack_web_cookie_missing")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(json.dumps({"uid": cookie}), encoding="utf-8")
+        os.chmod(temporary, 0o600)
+        temporary.replace(path)
+    except OSError:
+        pass
+    return cookie
+
+
+def _notrack_web_chat(prompt: str) -> str:
+    """Usa el chat web anónimo de NoTrack como respaldo sin exponer una clave API."""
+    with _NOTRACK_WEB_LOCK:
+        cookie = _notrack_web_session_cookie()
+        request_body = json.dumps({
+            "user_input": prompt[:16000], "mode": "usual", "model": "C",
+            "persona": "normal", "max_turns": 3, "chat_id": None,
+            "attachments": [], "regenerate": False, "edit": False,
+            "edit_mid": None, "via": "typed",
+        }, separators=(",", ":")).encode("utf-8")
+        request = urllib.request.Request(
+            "https://notrack.ai/api/dispatch", data=request_body,
+            headers={
+                "User-Agent": _NOTRACK_WEB_UA, "Accept": "text/event-stream",
+                "Origin": "https://notrack.ai", "Referer": "https://notrack.ai/es/chat",
+                "Cookie": f"uid={cookie}", "Content-Type": "application/json",
+            }, method="POST",
+        )
+        chunks: list[str] = []
+        final = ""
+        with urllib.request.urlopen(request, timeout=170) as response:
+            if "event-stream" not in response.headers.get("Content-Type", ""):
+                raise RuntimeError("notrack_web_invalid_stream")
+            for raw_line in response:
+                line = raw_line.decode("utf-8", "replace").strip()
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except (TypeError, ValueError):
+                    continue
+                event_type = event.get("type")
+                if event_type == "delta":
+                    chunks.append(str(event.get("chunk") or ""))
+                elif event_type in {"message", "consensus"} and event.get("content"):
+                    final = str(event["content"])
+                elif event_type == "error":
+                    raise RuntimeError(str(event.get("code") or "notrack_web_error"))
+                if event_type in {"done", "message", "consensus", "error"}:
+                    break
+        answer = (final or "".join(chunks)).strip()
+        if not answer:
+            raise RuntimeError("notrack_web_empty_response")
+        return answer
 
 
 def _compress_app_upload(source: Path, filename: str) -> tuple[Path, str]:
@@ -117,11 +201,8 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
         return {"ok": False, "error": "premium_required"}, 403
 
     api_key = os.getenv("IASINCENSURA", "").strip()
-    if not api_key:
-        return {"ok": False, "error": "ai_not_configured"}, 503
-    if (not api_key.startswith("sk-notrack-") or len(api_key) < 24
-            or any(char.isspace() for char in api_key)):
-        return {"ok": False, "error": "ai_not_configured"}, 503
+    api_key_valid = (api_key.startswith("sk-notrack-") and len(api_key) >= 24
+                     and not any(char.isspace() for char in api_key))
 
     messages = body.get("messages")
     if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
@@ -204,6 +285,15 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
             "personales. No reveles ni inventes detalles privados de repositorios, archivos, configuración o credenciales."
         ),
     }, *clean_messages]
+    if not api_key_valid:
+        fallback_prompt = "\n\n".join(
+            f"{item['role'].upper()}: {item['content']}" for item in request_messages
+        )
+        try:
+            answer = _notrack_web_chat(fallback_prompt)
+        except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
+            return {"ok": False, "error": "ai_fallback_unavailable"}, 503
+        return {"ok": True, "reply": answer}, 200
     request_body = json.dumps({
         "model": "notrack-uncensored",
         "messages": request_messages,
