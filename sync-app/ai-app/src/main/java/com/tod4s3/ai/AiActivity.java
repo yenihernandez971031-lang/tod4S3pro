@@ -160,6 +160,14 @@ public final class AiActivity extends Activity {
         LinearLayout.LayoutParams loginParams = new LinearLayout.LayoutParams(fieldWidth, dp(56));
         loginParams.gravity = Gravity.CENTER_HORIZONTAL;
         content.addView(loginButton, loginParams);
+        Button registerButton = button("CREAR CUENTA  +", PANEL);
+        registerButton.setTextSize(12);
+        registerButton.setBackground(roundStroke(PANEL, 14, Color.rgb(78, 82, 98)));
+        registerButton.setOnClickListener(v -> requestAccount());
+        LinearLayout.LayoutParams registerParams = new LinearLayout.LayoutParams(fieldWidth, dp(48));
+        registerParams.gravity = Gravity.CENTER_HORIZONTAL;
+        registerParams.setMargins(0, dp(8), 0, 0);
+        content.addView(registerButton, registerParams);
         status = label("▢  Acceso con la cuenta AiTod4S3 que te creó el administrador.", 12, false, Color.rgb(181, 188, 201));
         status.setGravity(Gravity.CENTER);
         status.setPadding(dp(12), dp(12), dp(12), dp(12));
@@ -207,6 +215,27 @@ public final class AiActivity extends Activity {
                     loginButton.setEnabled(true);
                     status.setText(message);
                 });
+            }
+        });
+    }
+
+    private void requestAccount() {
+        final String name = userField.getText().toString().trim();
+        final String pass = passwordField.getText().toString();
+        if (name.isEmpty() || pass.isEmpty()) { status.setText("Escribe el usuario y una contraseña de mínimo 10 caracteres."); return; }
+        loginButton.setEnabled(false);
+        status.setText("Enviando solicitud al administrador…");
+        io.execute(() -> {
+            try {
+                JSONObject request = new JSONObject().put("username", name).put("password", pass).put("device_id", deviceId());
+                post("/api/ai/register", null, request);
+                runOnUiThread(() -> {
+                    loginButton.setEnabled(true);
+                    status.setText("Solicitud enviada. Cuando el administrador la apruebe, inicia sesión con estos datos.");
+                });
+            } catch (Exception e) {
+                String message = friendlyError(e);
+                runOnUiThread(() -> { loginButton.setEnabled(true); status.setText(message); });
             }
         });
     }
@@ -754,6 +783,10 @@ public final class AiActivity extends Activity {
         if (raw.contains("invalid_device")) return "No se pudo identificar este dispositivo Android.";
         if (raw.contains("unauthorized")) return "La sesión venció. Inicia sesión otra vez.";
         if (raw.contains("login_rate_limited")) return "Demasiados intentos. Espera unos minutos.";
+        if (raw.contains("account_exists")) return "Ese usuario ya tiene una cuenta AiTod4S3 activa.";
+        if (raw.contains("request_exists")) return "Ya existe una solicitud pendiente para ese usuario.";
+        if (raw.contains("invalid_username")) return "Usuario inválido: usa 3–32 letras, números, punto, guion o guion bajo.";
+        if (raw.contains("invalid_password")) return "La contraseña debe tener entre 10 y 256 caracteres.";
         if (raw.contains("ai_rate_limited")) return "Espera un momento antes de enviar otro mensaje.";
         if (raw.contains("ai_not_configured")) return "La IA no está configurada temporalmente. El respaldo automático también está iniciándose.";
         if (raw.contains("ai_fallback_unavailable")) return "La IA principal y su respaldo web no responden ahora. Inténtalo de nuevo más tarde.";

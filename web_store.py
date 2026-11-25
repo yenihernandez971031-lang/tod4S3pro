@@ -1092,7 +1092,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
             "/api/app/nikudaria/agent",
             "/api/app/update-decline", "/api/app/device-status", "/api/app/compress",
             "/api/app/announcements/respond", "/api/app/announcements/dismiss",
-            "/api/ai/login", "/api/ai/logout", "/api/ai/chat",
+            "/api/ai/register", "/api/ai/login", "/api/ai/logout", "/api/ai/chat",
         }:
             self._json_response({"ok": False, "error": "not_found"}, 404)
             return
@@ -1102,7 +1102,7 @@ class StoreHandler(SimpleHTTPRequestHandler):
         try:
             length = int(self.headers.get("Content-Length", "0"))
             max_body_length = 65_536 if parsed.path in {
-                "/api/app/ai/chat", "/api/app/nikudaria/agent", "/api/ai/chat",
+                "/api/app/ai/chat", "/api/app/nikudaria/agent", "/api/ai/register", "/api/ai/chat",
             } else 8192
             if length < 0 or length > max_body_length:
                 raise ValueError("body_too_large")
@@ -1130,6 +1130,24 @@ class StoreHandler(SimpleHTTPRequestHandler):
                     self._json_response({"ok": False, "error": "invalid_or_expired_code"}, 401)
             else:
                 self._json_response({"ok": True, "token": token})
+            return
+        if parsed.path == "/api/ai/register":
+            username, password = body.get("username"), body.get("password")
+            device_id = body.get("device_id")
+            if not isinstance(device_id, str) or not re.fullmatch(r"[a-fA-F0-9]{16}", device_id):
+                self._json_response({"ok": False, "error": "invalid_device"}, 400)
+                return
+            try:
+                ai_auth.request_account(username, password, device_id)
+            except ValueError as exc:
+                reason = str(exc)
+                status = 409 if reason in {"account_exists", "request_exists"} else 400
+                self._json_response({"ok": False, "error": reason}, status)
+                return
+            except (RuntimeError, OSError):
+                self._json_response({"ok": False, "error": "auth_service_unavailable"}, 503)
+                return
+            self._json_response({"ok": True, "pending": True}, 202)
             return
         if parsed.path == "/api/ai/login":
             username, password = body.get("username"), body.get("password")

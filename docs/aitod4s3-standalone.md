@@ -16,6 +16,8 @@ Un administrador del bot, desde el chat privado, utiliza:
 
 El nombre de usuario debe tener 3–32 caracteres (letras ASCII, números, punto, guion o guion bajo); la contraseña debe tener al menos 10 caracteres. El bot intenta borrar el mensaje de comando antes de crear la cuenta y no la crea si no puede borrarlo. No envía ni repite la contraseña en su respuesta. Ejecutar `/crear_ia` otra vez con el mismo usuario reemplaza la contraseña y revoca sus sesiones.
 
+La APK también muestra **Crear cuenta** en la pantalla de acceso. La solicitud guarda solo un verificador PBKDF2 y queda pendiente hasta que un administrador la apruebe en `Panel de administración → AiTod4S3 → Solicitudes pendientes`. El dispositivo que envía la solicitud queda vinculado al aprobarla; también se puede rechazar desde ese panel.
+
 Para desactivar una cuenta y revocar sus sesiones:
 
 ```text
@@ -34,7 +36,7 @@ Eso revoca sus sesiones y permite que el siguiente Android que inicie sesión qu
 
 ## Almacenamiento y seguridad
 
-Las cuentas se guardan en `AI_ACCOUNTS_FILE`, cuyo valor predeterminado en el bot es `ai_app_accounts.json` dentro de `DATA_DIR` (en Railway debe ser un volumen persistente). Las contraseñas se verifican con PBKDF2-HMAC-SHA256 y sal aleatoria; la contraseña no se almacena en claro. El archivo se escribe atómicamente con permisos restrictivos. Los tokens aleatorios de sesión duran 30 días y se guarda solo su hash; reemplazar o desactivar una cuenta revoca sus sesiones. La vinculación por Android ID impide el uso normal simultáneo desde otro teléfono; no equivale a atestación de hardware y un dispositivo rooteado con herramientas para falsificar identificadores podría evadirla.
+Las cuentas se guardan en `AI_ACCOUNTS_FILE`, cuyo valor predeterminado en el bot es `ai_app_accounts.json` dentro de `DATA_DIR` (en Railway debe ser un volumen persistente). Las contraseñas se verifican con PBKDF2-HMAC-SHA256 y sal aleatoria; la contraseña no se almacena en claro. El archivo se escribe atómicamente con permisos restrictivos y se incluye en el respaldo cifrado de Telegram junto con las solicitudes pendientes. Los tokens aleatorios de sesión duran 30 días y se guarda solo su hash; reemplazar o desactivar una cuenta revoca sus sesiones. La vinculación por Android ID impide el uso normal simultáneo desde otro teléfono; no equivale a atestación de hardware y un dispositivo rooteado con herramientas para falsificar identificadores podría evadirla.
 
 El chat limita cada cuenta a 8 solicitudes/minuto y 80/día por defecto (`AI_APP_DAILY_LIMIT` puede ajustarse). El endpoint móvil usa HTTPS fijo. Si `IASINCENSURA` está configurada, se usa primero la API principal; si falta o falla, el backend usa automáticamente el chat web de NoTrack como respaldo, sin exponer claves en la APK.
 
@@ -51,6 +53,7 @@ La APK de depuración se genera en `ai-app/build/outputs/apk/debug/ai-app-debug.
 ## Rutas
 
 - `POST /api/ai/login`
+- `POST /api/ai/register`
 - `POST /api/ai/logout`
 - `POST /api/ai/chat`
 - Archivo de actividad: `sync-app/ai-app/src/main/java/com/tod4s3/ai/AiActivity.java`

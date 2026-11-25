@@ -436,6 +436,7 @@ def telegram_backup_layout() -> BackupLayout:
             "todus_auth.json": TODUS_AUTH_FILE,
             "todus_sent_messages.json": TODUS_SENT_MESSAGES_FILE,
             "sync_app.json": SYNC_APP_STATE_FILE,
+            "ai_app_accounts.json": AI_ACCOUNTS_FILE,
         },
     )
 
@@ -3366,6 +3367,31 @@ def admin_ai_result_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def admin_ai_pending_text(requests: list[dict]) -> str:
+    if not requests:
+        return card("🤖 Solicitudes AiTod4S3", ["No hay solicitudes pendientes."])
+    return card("🤖 Solicitudes AiTod4S3", [
+        "Estas cuentas fueron solicitadas desde la aplicación.",
+        "Aprueba solo las solicitudes que reconozcas.",
+        "",
+        *[f"• {item.get('username', '')}" for item in requests],
+    ])
+
+
+def admin_ai_pending_keyboard(requests: list[dict]) -> InlineKeyboardMarkup:
+    rows = []
+    for item in requests:
+        username = str(item.get("username", ""))
+        if re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", username):
+            rows.append([
+                btn(f"✅ Aprobar {username}", callback_data=f"admin:ai:approve:{username}"),
+                btn("❌ Rechazar", callback_data=f"admin:ai:reject:{username}"),
+            ])
+    rows.append([btn("🔄 Actualizar", callback_data="admin:ai:pending")])
+    rows.append([btn("⬅️ Gestión AiTod4S3", callback_data="admin:menu:ai")])
+    return InlineKeyboardMarkup(rows)
+
+
 def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
     sections = {
         "users": [
@@ -3401,6 +3427,7 @@ def admin_section_keyboard(section: str) -> InlineKeyboardMarkup:
             [btn("📖 ᴛᴜᴛᴏʀɪᴀʟ ᴅᴇ ᴜꜱᴏ", callback_data="admin:tutorial")],
         ],
         "ai": [
+            [btn("📝 Solicitudes pendientes", callback_data="admin:ai:pending")],
             [btn("➕ Crear cuenta AiTod4S3", callback_data="admin:ai:create")],
             [btn("🚫 Desactivar cuenta", callback_data="admin:ai:deactivate")],
             [btn("📱 Liberar dispositivo", callback_data="admin:ai:release")],
@@ -5874,6 +5901,7 @@ async def create_ai_account_command(update: Update, context: ContextTypes.DEFAUL
     except (RuntimeError, OSError):
         await context.bot.send_message(chat_id=chat.id, text="No se pudo guardar la cuenta AiTod4S3. Revisa el almacenamiento persistente.")
         return
+    schedule_data_backup(context.application, "cuenta AiTod4S3 creada o actualizada")
     await context.bot.send_message(chat_id=chat.id, text=f"Cuenta AiTod4S3 creada/actualizada: {args[0]}. Las sesiones anteriores quedaron revocadas.")
 
 
@@ -5897,6 +5925,8 @@ async def deactivate_ai_account_command(update: Update, context: ContextTypes.DE
     except (RuntimeError, OSError):
         await context.bot.send_message(chat_id=chat.id, text="No se pudo actualizar la cuenta AiTod4S3.")
         return
+    if changed:
+        schedule_data_backup(context.application, "cuenta AiTod4S3 desactivada")
     await context.bot.send_message(chat_id=chat.id, text="Cuenta desactivada y sesiones revocadas." if changed else "La cuenta no existe o ya estaba desactivada.")
 
 
@@ -5920,6 +5950,8 @@ async def release_ai_device_command(update: Update, context: ContextTypes.DEFAUL
     except (RuntimeError, OSError):
         await context.bot.send_message(chat_id=chat.id, text="No se pudo liberar el dispositivo AiTod4S3.")
         return
+    if changed:
+        schedule_data_backup(context.application, "dispositivo AiTod4S3 liberado")
     await context.bot.send_message(chat_id=chat.id, text="Dispositivo liberado y sesiones revocadas. El próximo Android que inicie sesión quedará vinculado." if changed else "La cuenta no existe, está desactivada o no tenía un dispositivo vinculado.")
 
 
@@ -6684,6 +6716,41 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             }
             title, subtitle = section_titles.get(section, ("⚙️ ᴘᴀɴᴇʟ ᴅᴇ ᴀᴅᴍɪɴ", "Selecciona una función."))
             await edit_query_message_text(query.message, card(title, [subtitle, "", "Selecciona una acción:"]), reply_markup=admin_section_keyboard(section))
+            return
+
+        if query.data == "admin:ai:pending":
+            try:
+                requests = ai_auth.pending_accounts()
+            except (RuntimeError, OSError):
+                await query.answer(sc("No se pudieron leer las solicitudes"), show_alert=True)
+                return
+            await query.answer()
+            await edit_query_message_text(
+                query.message, admin_ai_pending_text(requests),
+                reply_markup=admin_ai_pending_keyboard(requests),
+            )
+            return
+
+        if query.data.startswith("admin:ai:approve:") or query.data.startswith("admin:ai:reject:"):
+            parts = query.data.split(":", 3)
+            if len(parts) != 4 or not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", parts[3]):
+                await query.answer(sc("Solicitud no válida"), show_alert=True)
+                return
+            username = parts[3]
+            try:
+                changed = (ai_auth.approve_account_request(username)
+                           if parts[2] == "approve" else ai_auth.reject_account_request(username))
+            except (RuntimeError, OSError):
+                await query.answer(sc("No se pudo actualizar la solicitud"), show_alert=True)
+                return
+            if changed:
+                schedule_data_backup(context.application, f"solicitud AiTod4S3 {parts[2]}")
+            requests = ai_auth.pending_accounts()
+            await query.answer(sc("Solicitud actualizada") if changed else sc("La solicitud ya no existe"), show_alert=not changed)
+            await edit_query_message_text(
+                query.message, admin_ai_pending_text(requests),
+                reply_markup=admin_ai_pending_keyboard(requests),
+            )
             return
 
         if query.data in {"admin:ai:create", "admin:ai:deactivate", "admin:ai:release"}:

@@ -96,9 +96,88 @@ def create_or_update_account(username: object, password: object) -> None:
         if isinstance(previous, dict) and previous.get("device_hash"):
             row["device_hash"] = previous["device_hash"]
         data["users"][username] = row
+        pending = data.setdefault("pending", {})
+        if isinstance(pending, dict):
+            pending.pop(username, None)
         # Replacing credentials invalidates all existing sessions for that user.
         data["sessions"] = {key: row for key, row in data["sessions"].items() if row.get("username") != username}
         _save(data)
+
+
+def request_account(username: object, password: object, device_id: object) -> None:
+    """Store a password verifier pending administrator approval."""
+    username, password = validate_credentials(username, password)
+    device_hash = _device_digest(device_id)
+    if device_hash is None:
+        raise ValueError("invalid_device")
+    salt = secrets.token_bytes(16)
+    verifier = _password_hash(password, salt)
+    with _LOCK:
+        data = _load()
+        existing = data["users"].get(username)
+        if isinstance(existing, dict) and existing.get("active"):
+            raise ValueError("account_exists")
+        pending = data.setdefault("pending", {})
+        if not isinstance(pending, dict):
+            raise RuntimeError("ai_account_storage_unavailable")
+        if username in pending:
+            raise ValueError("request_exists")
+        pending[username] = {
+            "salt": salt.hex(), "password_hash": verifier.hex(),
+            "iterations": _ITERATIONS, "device_hash": device_hash,
+            "requested_at": int(time.time()),
+        }
+        _save(data)
+
+
+def pending_accounts() -> list[dict[str, object]]:
+    """Return safe request metadata, never password material."""
+    with _LOCK:
+        data = _load()
+        pending = data.setdefault("pending", {})
+        if not isinstance(pending, dict):
+            raise RuntimeError("ai_account_storage_unavailable")
+        return [
+            {"username": str(username), "requested_at": int(row.get("requested_at", 0))}
+            for username, row in sorted(pending.items())
+            if isinstance(row, dict)
+        ]
+
+
+def approve_account_request(username: object) -> bool:
+    """Promote one pending request to an active account."""
+    if not isinstance(username, str) or not _USERNAME_RE.fullmatch(username.strip()):
+        return False
+    username = username.strip()
+    with _LOCK:
+        data = _load()
+        pending = data.setdefault("pending", {})
+        row = pending.get(username) if isinstance(pending, dict) else None
+        if not isinstance(row, dict):
+            return False
+        data["users"][username] = {
+            "salt": row["salt"], "password_hash": row["password_hash"],
+            "iterations": row["iterations"], "active": True,
+            "device_hash": row["device_hash"], "updated_at": int(time.time()),
+        }
+        pending.pop(username, None)
+        data["sessions"] = {key: item for key, item in data["sessions"].items() if item.get("username") != username}
+        _save(data)
+        return True
+
+
+def reject_account_request(username: object) -> bool:
+    """Delete one pending request without retaining its password verifier."""
+    if not isinstance(username, str):
+        return False
+    with _LOCK:
+        data = _load()
+        pending = data.setdefault("pending", {})
+        if not isinstance(pending, dict) or username not in pending:
+            return False
+        pending.pop(username, None)
+        _save(data)
+        return True
 
 
 def deactivate_account(username: object) -> bool:
@@ -113,6 +192,9 @@ def deactivate_account(username: object) -> bool:
         row["active"] = False
         row.pop("device_hash", None)
         row["updated_at"] = int(time.time())
+        pending = data.setdefault("pending", {})
+        if isinstance(pending, dict):
+            pending.pop(username, None)
         data["sessions"] = {key: item for key, item in data["sessions"].items() if item.get("username") != username}
         _save(data)
         return True
