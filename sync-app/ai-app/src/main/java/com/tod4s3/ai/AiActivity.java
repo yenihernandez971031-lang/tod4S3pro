@@ -296,8 +296,10 @@ public final class AiActivity extends Activity {
         page.setBackgroundColor(Color.TRANSPARENT);
         LinearLayout header = new LinearLayout(this);
         header.setGravity(Gravity.CENTER_VERTICAL);
-        View headerSpacer = new View(this);
-        header.addView(headerSpacer, lp(42, 42));
+        TextView logoutTop = label("‹", 30, false, Color.WHITE); logoutTop.setGravity(Gravity.CENTER);
+        logoutTop.setContentDescription("Salir y cambiar de cuenta"); logoutTop.setBackground(roundStroke(Color.rgb(29,31,40),15,Color.rgb(78,82,98)));
+        logoutTop.setOnClickListener(v -> { new android.app.AlertDialog.Builder(this).setTitle("Salir de AiTod4S3").setMessage("Se cerrará esta cuenta en este dispositivo.").setNegativeButton("Cancelar", null).setPositiveButton("Salir", (d,w) -> logout()).show(); });
+        header.addView(logoutTop, lp(42, 42));
         modeButton = button("AiTod4S3 · Rápido⌄", Color.rgb(22, 24, 34));
         modeButton.setTextSize(12); modeButton.setGravity(Gravity.CENTER);
         modeButton.setBackground(roundStroke(Color.rgb(22, 24, 34), 16, Color.rgb(64, 68, 87)));
@@ -309,9 +311,13 @@ public final class AiActivity extends Activity {
         callButton.setOnClickListener(v -> toggleVoiceCall());
         header.addView(callButton, lp(42,42));
         TextView newChat = label("✎", 20, true, Color.WHITE); newChat.setGravity(Gravity.CENTER);
-        newChat.setContentDescription("Nuevo chat"); newChat.setBackground(roundStroke(Color.rgb(29,31,40), 15, Color.rgb(78,82,98)));
-        newChat.setOnClickListener(v -> startNewChat());
+        newChat.setContentDescription("Crear nuevo chat"); newChat.setBackground(roundStroke(Color.rgb(29,31,40), 15, Color.rgb(78,82,98)));
+        newChat.setOnClickListener(v -> { startNewChat(); Toast.makeText(this, "Nuevo chat creado", Toast.LENGTH_SHORT).show(); });
         header.addView(newChat, lp(42, 42));
+        TextView deleteChat = label("⌫", 20, true, Color.rgb(255,150,165)); deleteChat.setGravity(Gravity.CENTER);
+        deleteChat.setContentDescription("Borrar chat actual"); deleteChat.setBackground(roundStroke(Color.rgb(48,25,34),15,Color.rgb(126,54,72)));
+        deleteChat.setOnClickListener(v -> new android.app.AlertDialog.Builder(this).setTitle("Borrar chat").setMessage("Se eliminarán los mensajes de esta conversación.").setNegativeButton("Cancelar", null).setPositiveButton("Borrar", (d,w) -> { history.clear(); saveHistory(); renderEmptyChat(); Toast.makeText(this,"Chat borrado",Toast.LENGTH_SHORT).show(); }).show());
+        header.addView(deleteChat, lp(42, 42));
         page.addView(header, margins(-1, 48, 0, 0, 0, 8));
         scroll = new ScrollView(this); scroll.setFillViewport(true); scroll.setVerticalScrollBarEnabled(false);
         transcript = column(); transcript.setPadding(dp(2), dp(12), dp(2), dp(14));
@@ -507,7 +513,7 @@ public final class AiActivity extends Activity {
 
     private void stopDictation() { if (speechRecognizer != null) speechRecognizer.stopListening(); dictating=false; if (micButton != null) { micButton.setContentDescription("Dictar mensaje por voz"); micButton.setBackground(roundStroke(Color.rgb(31,33,42),22,Color.argb(52,255,255,255))); } if (chatStatus != null) chatStatus.setText("en línea"); }
 
-    private void startNewChat() { if (sending) { Toast.makeText(this,"Espera a que termine la respuesta o deténla.",Toast.LENGTH_SHORT).show(); return; } history.clear(); saveHistory(); chatMode="fast"; webEnabled=false; thinkEnabled=false; imageEnabled=false; showChat(); Toast.makeText(this,"Nuevo chat listo. La memoria guardada se conserva.",Toast.LENGTH_SHORT).show(); }
+    private void startNewChat() { if (sending) { Toast.makeText(this,"Espera a que termine la respuesta o deténla.",Toast.LENGTH_SHORT).show(); return; } history.clear(); saveHistory(); chatMode="fast"; webEnabled=false; thinkEnabled=false; imageEnabled=false; showChat(); }
 
     private boolean isUsableVoicePhrase(String phrase, Bundle results) {
         if (phrase == null) return false;
