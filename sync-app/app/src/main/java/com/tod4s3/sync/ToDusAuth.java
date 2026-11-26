@@ -19,7 +19,9 @@ final class ToDusAuth {
     private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final Pattern JWT_PATTERN = Pattern.compile("eyJ[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+\\.[a-zA-Z0-9_-]+");
-    private static final Pattern PASSWORD_PATTERN = Pattern.compile("[a-fA-F0-9]{96}");
+    private static final Pattern PASSWORD_PATTERN = Pattern.compile("[a-fA-F0-9]{32,256}");
+    private static final Pattern JSON_SESSION_PATTERN = Pattern.compile("\"(?:password|session_password|session|token)\"\\s*:\\s*\"([A-Za-z0-9._~+/=-]{32,256})\"");
+    private static final Pattern SAFE_SESSION_PATTERN = Pattern.compile("[A-Za-z0-9._~+\\/=\\-]{32,256}");
 
     private ToDusAuth() { }
 
@@ -100,38 +102,30 @@ final class ToDusAuth {
     }
 
     private static String extractSessionPassword(byte[] response) throws IOException {
-        if (response == null || response.length == 0) {
-            throw new IOException("ToDus no devolvió la clave de sesión.");
-        }
-
-        // ToDus ha servido una respuesta heredada con cabecera fija y otra con
-        // la clave como texto dentro de un protobuf. No tomamos bytes
-        // arbitrarios del body: una clave truncada no permite iniciar sesión.
+        if (response == null || response.length == 0) throw new IOException("ToDus no devolvió la clave de sesión.");
+        String latin = new String(response, StandardCharsets.ISO_8859_1);
+        Matcher json = JSON_SESSION_PATTERN.matcher(latin);
+        if (json.find() && isSessionPassword(json.group(1))) return json.group(1);
+        Matcher hexPassword = PASSWORD_PATTERN.matcher(latin);
+        if (hexPassword.find() && isSessionPassword(hexPassword.group())) return hexPassword.group();
         for (int i = 0; i < response.length; i++) {
-            if (response[i] == '`' && response.length - i - 1 >= 96) {
-                String candidate = printableTrim(response, i + 1, 96);
+            if (response[i] == '`') {
+                int end = i + 1;
+                while (end < response.length && response[end] != '`' && end - i <= 257) end++;
+                String candidate = printableTrim(response, i + 1, end - i - 1);
                 if (isSessionPassword(candidate)) return candidate;
             }
         }
-
-        String latin = new String(response, StandardCharsets.ISO_8859_1);
-        Matcher hexPassword = PASSWORD_PATTERN.matcher(latin);
-        if (hexPassword.find()) return hexPassword.group();
-
         String protobufCandidate = findLengthDelimitedPassword(response);
         if (!protobufCandidate.isEmpty()) return protobufCandidate;
-
-        if (response.length >= 166) {
-            String legacyField = printableTrim(response, 5, 161);
-            if (!legacyField.isEmpty()) return legacyField;
-        }
-
-        // Último formato observado por el SDK de ToDus: body de texto
-        // imprimible sin delimitador reconocible.
-        String printable = printableTrim(response, 0, response.length);
-        if (printable.length() >= 96) {
-            String candidate = printable.substring(0, 96).trim();
+        Matcher safe = SAFE_SESSION_PATTERN.matcher(latin);
+        while (safe.find()) {
+            String candidate = safe.group();
             if (isSessionPassword(candidate)) return candidate;
+        }
+        if (response.length >= 32) {
+            String printable = printableTrim(response, 0, response.length);
+            if (isSessionPassword(printable)) return printable;
         }
         throw new IOException("No se pudo interpretar la clave de sesión que devolvió ToDus.");
     }
@@ -202,7 +196,12 @@ final class ToDusAuth {
     }
 
     private static boolean isSessionPassword(String candidate) {
-        return candidate != null && candidate.length() == 96 && !candidate.matches(".*\\s.*");
+        if (candidate == null || candidate.length() < 32 || candidate.length() > 256 || candidate.matches(".*\\s.*")) return false;
+        for (int i = 0; i < candidate.length(); i++) {
+            char ch = candidate.charAt(i);
+            if (!(Character.isLetterOrDigit(ch) || ".-_~+/=".indexOf(ch) >= 0)) return false;
+        }
+        return true;
     }
 
     private static byte[] post(String endpoint, byte[] payload) throws Exception {
