@@ -56,9 +56,13 @@ class FakeQuery:
 class FakeBot:
     def __init__(self):
         self.actions = []
+        self.memberships = {}
 
     async def send_chat_action(self, chat_id, action):
         self.actions.append((chat_id, action))
+
+    async def get_chat_member(self, chat_id, user_id):
+        return SimpleNamespace(status=self.memberships.get(chat_id, "member"), is_member=True)
 
 
 class FakeBroadcaster(FakeBot):
@@ -86,7 +90,7 @@ def test_join_keyboard_has_two_channel_links_and_visual_continue_button():
     assert [button.style for button in buttons] == ["primary", "success", "success"]
 
 
-def test_unconfirmed_chat_shows_optional_styled_channel_panel():
+def test_unconfirmed_chat_requires_both_channels_and_shows_styled_panel():
     async def run():
         user_id = 123
         secondary._JOIN_CONFIRMED.discard(user_id)
@@ -95,13 +99,13 @@ def test_unconfirmed_chat_shows_optional_styled_channel_panel():
         assert not await secondary._require_access(update)
         text, options = update.effective_message.calls[0]
         assert "¡Bienvenido a la IA!" in text
-        assert "opcionales" in text
+        assert "dos canales" in text
         assert options["reply_markup"] is not None
 
     asyncio.run(run())
 
 
-def test_pressing_already_joined_unlocks_bot_without_membership_lookup():
+def test_confirmed_member_unlocks_bot_after_both_memberships_are_checked():
     async def run():
         user_id = 456
         secondary._JOIN_CONFIRMED.discard(user_id)
@@ -111,12 +115,41 @@ def test_pressing_already_joined_unlocks_bot_without_membership_lookup():
             effective_user=SimpleNamespace(id=user_id),
         )
 
-        await secondary._verify(update, SimpleNamespace())
+        await secondary._verify(update, SimpleNamespace(bot=FakeBot()))
 
         assert query.answers
         assert user_id in secondary._JOIN_CONFIRMED
         assert "Acceso listo" in query.edited[0][0]
         assert await secondary._require_access(FakeUpdate(user_id))
+
+    asyncio.run(run())
+
+
+def test_legacy_visual_confirmations_are_not_trusted_after_upgrade(monkeypatch, tmp_path):
+    user_id = 458
+    state_file = tmp_path / "legacy_state.json"
+    state_file.write_text(json.dumps({"join_confirmed": [user_id], "users": {}}), encoding="utf-8")
+    monkeypatch.setattr(secondary, "STATE_FILE", state_file)
+    secondary._JOIN_CONFIRMED.discard(user_id)
+    secondary._load_state()
+    assert user_id not in secondary._JOIN_CONFIRMED
+
+
+def test_verify_keeps_user_blocked_if_either_channel_membership_is_missing():
+    async def run():
+        user_id = 457
+        secondary._JOIN_CONFIRMED.discard(user_id)
+        bot = FakeBot()
+        bot.memberships[secondary.CHANNEL_TWO] = "left"
+        query = FakeQuery()
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=user_id),
+        )
+        await secondary._verify(update, SimpleNamespace(bot=bot))
+        assert user_id not in secondary._JOIN_CONFIRMED
+        assert "No pude confirmar" in query.edited[0][0]
+        assert query.edited[0][1]["reply_markup"] is not None
 
     asyncio.run(run())
 
@@ -463,12 +496,14 @@ def test_telegram_ai_backend_uses_code_instructions_and_ten_hour_cap(monkeypatch
     limited, status = web_store.dispatch_telegram_ai_chat(959, messages)
     assert status == 429
     assert limited["error"] == "ai_10_hour_limit"
+    extra, status = web_store.dispatch_telegram_ai_chat(959, messages, question_limit=11)
+    assert status == 200 and extra["ok"]
     assert captured["body"]["max_tokens"] == 768
     assert "solución ejecutable" in captured["body"]["messages"][0]["content"]
     for _ in range(12):
         payload, status = web_store.dispatch_telegram_ai_chat(959, messages, bypass_quota=True)
         assert status == 200 and payload["ok"]
-    assert len(web_store._AI_TELEGRAM_REQUESTS_BY_USER[959]) == 10
+    assert len(web_store._AI_TELEGRAM_REQUESTS_BY_USER[959]) == 11
 
     clock[0] += secondary.QUESTION_WINDOW_SECONDS + 1
     payload, status = web_store.dispatch_telegram_ai_chat(959, messages)
@@ -586,3 +621,54 @@ def test_delegated_main_bot_admin_is_loaded_for_quota_exemption(monkeypatch, tmp
     secondary._refresh_admin_user_ids()
 
     assert admin_id in secondary.ADMIN_USER_IDS
+
+
+def test_referral_reward_is_unique_and_adds_one_question_up_to_cap(monkeypatch, tmp_path):
+    monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "bot_state.json")
+    inviter, invited = 987_001, 987_002
+    secondary._USERS[inviter] = {"referral_bonus": secondary.MAX_REFERRAL_BONUS - 1, "referrals": []}
+    secondary._USERS[invited] = {"pending_referrer_id": inviter}
+    assert secondary._complete_referral(invited)
+    assert not secondary._complete_referral(invited)
+    assert secondary._USERS[inviter]["referral_bonus"] == secondary.MAX_REFERRAL_BONUS
+    assert secondary._USERS[inviter]["referrals"] == [invited]
+    assert secondary._question_limit(inviter) == secondary.QUESTION_LIMIT + secondary.MAX_REFERRAL_BONUS
+
+
+def test_chat_history_is_persisted_in_bot_state_and_shown_to_admin(monkeypatch, tmp_path):
+    state_file = tmp_path / "bot_state.json"
+    monkeypatch.setattr(secondary, "STATE_FILE", state_file)
+    user_id = 987_003
+    secondary._HISTORY[(user_id, user_id)] = [
+        {"role": "user", "content": "<script>hola</script>"},
+        {"role": "assistant", "content": "Respuesta"},
+    ]
+    with secondary._RATE_LOCK:
+        secondary._save_state_locked()
+    saved = json.loads(state_file.read_text(encoding="utf-8"))
+    assert saved["history"][f"{user_id}:{user_id}"][0]["content"] == "<script>hola</script>"
+    secondary._HISTORY.pop((user_id, user_id), None)
+    secondary._load_state()
+    assert secondary._HISTORY[(user_id, user_id)][-1]["content"] == "Respuesta"
+    text, _ = secondary._admin_user_history(user_id)
+    assert "&lt;script&gt;hola&lt;/script&gt;" in text
+    assert "<script>" not in text
+
+
+def test_quota_status_includes_referral_questions():
+    user_id = 987_004
+    old_user = secondary._USERS.get(user_id)
+    old_questions = secondary._QUESTIONS.get(user_id)
+    secondary._USERS[user_id] = {"referral_bonus": 2}
+    secondary._QUESTIONS[user_id] = [secondary.time.time()] * secondary.QUESTION_LIMIT
+    try:
+        assert secondary._quota_status(user_id)[0] == 2
+    finally:
+        if old_user is None:
+            secondary._USERS.pop(user_id, None)
+        else:
+            secondary._USERS[user_id] = old_user
+        if old_questions is None:
+            secondary._QUESTIONS.pop(user_id, None)
+        else:
+            secondary._QUESTIONS[user_id] = old_questions

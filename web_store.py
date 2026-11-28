@@ -354,12 +354,15 @@ def dispatch_telegram_ai_chat(
     messages: list[dict[str, str]],
     *,
     bypass_quota: bool = False,
+    question_limit: int = 10,
 ) -> tuple[dict, int]:
     """Usa el proveedor de IA compartido; el bot secundario no recibe credenciales."""
     if not isinstance(user_id, int) or user_id <= 0:
         return {"ok": False, "error": "invalid_user"}, 400
     if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
         return {"ok": False, "error": "invalid_messages"}, 400
+    if isinstance(question_limit, bool) or not isinstance(question_limit, int) or not 1 <= question_limit <= 20:
+        return {"ok": False, "error": "invalid_question_limit"}, 400
     clean: list[dict[str, str]] = []
     total = 0
     for item in messages:
@@ -381,7 +384,7 @@ def dispatch_telegram_ai_chat(
         now = time.monotonic()
         with _AI_RATE_LOCK:
             window = [seen for seen in _AI_TELEGRAM_REQUESTS_BY_USER.get(user_id, []) if now - seen < 10 * 60 * 60]
-            if len(window) >= 10:
+            if len(window) >= question_limit:
                 return {"ok": False, "error": "ai_10_hour_limit"}, 429
             window.append(now)
             _AI_TELEGRAM_REQUESTS_BY_USER[user_id] = window

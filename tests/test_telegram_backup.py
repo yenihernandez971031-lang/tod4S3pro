@@ -177,6 +177,7 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
                 "users": {"321": {"first_name": "Prueba", "private_chat_id": 321}},
                 "banned_users": [],
                 "questions": {"321": [1800000000.0]},
+                "history": {"321:321": [{"role": "user", "content": "Pregunta guardada"}]},
                 "ai_enabled": True,
             }
             source_state.write_text(json.dumps(user_state), encoding="utf-8")
@@ -191,6 +192,10 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             restored_state = json.loads(target_state.read_text(encoding="utf-8"))
             self.assertEqual(restored_state["users"]["321"]["first_name"], "Prueba")
             self.assertEqual(restored_state["questions"]["321"], [1800000000.0])
+            self.assertEqual(
+                restored_state["history"]["321:321"][0]["content"],
+                "Pregunta guardada",
+            )
 
     async def test_backup_captures_premium_plans_and_activation_tokens_encrypted(self):
         with tempfile.TemporaryDirectory() as temp:
