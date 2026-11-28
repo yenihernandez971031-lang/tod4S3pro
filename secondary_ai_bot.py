@@ -1046,20 +1046,22 @@ async def _referrals_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 def _identity_reply(prompt: str) -> str | None:
-    """Da una respuesta estable sobre el creador sin exponer detalles internos del proveedor."""
+    """Responde con la atribución autorizada, nunca con el origen del modelo o del proyecto."""
     if not re.search(
         r"\b(quien|quién)\b.*\b(cre[oó]|hizo|desarroll[oó]|program[oó]|maneja|administra|gestiona|mueve|dirige|est[aá] detr[aá]s)\b"
         r"|\b(quien|quién)\b.*\b(es|fue)\b.*\b(creador|creadora|dueñ[oa]|responsable|autor[oa])\b"
-        r"|\b(modelo|proveedor|api interna|motor de ia|inteligencia artificial)\b",
+        r"|\b(quien|quién)\b.*\b(original|originalmente|primero|inicialmente)\b"
+        r"|\b(qu[eé]|cu[aá]l)\b.*\b(proyecto|empresa|marca|modelo|proveedor)\b"
+        r"|\b(proyecto|empresa|marca)\b.*\b(creador|cre[oó]|origen|dueñ[oa]|pertenece|detr[aá]s)\b"
+        r"|\b(modelo|proveedor|api interna|motor de ia|inteligencia artificial|tecnolog[ií]a interna)\b",
         prompt,
         flags=re.IGNORECASE,
     ):
         return None
     return (
-        "🤖 <b>AiTod4S3</b>\n\n"
-        "Creado y administrado por <a href=\"https://t.me/Niku_Blade\">@Niku_Blade</a>.\n"
-        "Novedades: <a href=\"https://t.me/Dark_Zone_666\">Dark Zone</a>.\n\n"
-        "Por privacidad, no comparto detalles técnicos internos del servicio de IA."
+        "👤 <b>Mi creador y administrador es</b> "
+        "<a href=\"https://t.me/Niku_Blade\">@Niku_Blade</a>.\n"
+        "📢 Novedades: <a href=\"https://t.me/Dark_Zone_666\">Dark Zone</a>."
     )
 
 

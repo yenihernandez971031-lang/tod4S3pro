@@ -841,7 +841,12 @@ def test_identity_questions_are_answered_without_calling_ai_backend(monkeypatch)
             lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("No debe llamar a la IA")),
         )
         for question in (
-            "¿Quién creó el bot?", "¿Quién es el creador?", "¿Quién es el que mueve el bot?", "¿Qué modelo es?"
+            "¿Quién creó el bot?",
+            "¿Quién es el creador?",
+            "¿Quién es el que mueve el bot?",
+            "¿Quién la creó originalmente?",
+            "¿Qué proyecto te creó?",
+            "¿Qué modelo es?",
         ):
             update = FakeUpdate(user_id, text=question)
             await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
@@ -849,6 +854,8 @@ def test_identity_questions_are_answered_without_calling_ai_backend(monkeypatch)
             assert "@Niku_Blade" in response
             assert "Dark Zone" in response
             assert "NoTrack" not in response
+            assert "OpenAI" not in response
+            assert "proyecto" not in response.lower()
 
     try:
         asyncio.run(run())
