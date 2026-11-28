@@ -17,6 +17,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ChatAction, ParseMode
 from telegram.error import InvalidToken
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
@@ -33,7 +34,7 @@ def _configured_token() -> str:
 
 
 TOKEN = _configured_token()
-# Canales obligatorios del bot 2; no requieren variables de entorno adicionales.
+# Enlaces promocionados en el panel visual del bot; no requieren variables nuevas.
 CHANNEL_ONE = "@Dark_Zone_666"
 CHANNEL_TWO = "@darzPrbo"
 CHANNEL_ONE_URL = "https://t.me/Dark_Zone_666"
@@ -42,36 +43,50 @@ MAX_HISTORY = 10
 _RATE_LOCK = threading.RLock()
 _RECENT = defaultdict(list)
 _DAILY = defaultdict(list)
-_HISTORY: dict[int, list[dict[str, str]]] = defaultdict(list)
+_HISTORY: dict[tuple[int, int], list[dict[str, str]]] = defaultdict(list)
 _JOIN_CONFIRMED: set[int] = set()
 
 
 def _join_keyboard() -> InlineKeyboardMarkup:
     rows = []
     if CHANNEL_ONE_URL:
-        rows.append([InlineKeyboardButton("📢 Canal oficial", url=CHANNEL_ONE_URL)])
+        rows.append([InlineKeyboardButton("🔵 Abrir canal oficial", url=CHANNEL_ONE_URL)])
     if CHANNEL_TWO_URL:
-        rows.append([InlineKeyboardButton("📢 Canal secundario", url=CHANNEL_TWO_URL)])
-    rows.append([InlineKeyboardButton("✅ Ya me uní — verificar", callback_data="secondary:verify")])
+        rows.append([InlineKeyboardButton("🟣 Abrir canal secundario", url=CHANNEL_TWO_URL)])
+    rows.append([InlineKeyboardButton("✅ Ya me uní · continuar", callback_data="secondary:verify")])
     return InlineKeyboardMarkup(rows)
 
 
-def _join_text(missing: list[str] | None = None) -> str:
-    if missing:
-        detail = "\n".join(f"• {item}" for item in missing)
-        return "Para usar la IA todavía debes unirte a estos canales:\n" + detail + "\n\nDespués pulsa «Ya me uní — verificar»."
-    return "Únete a los dos canales y luego pulsa «Ya me uní — verificar» para usar la IA."
+def _join_text() -> str:
+    return (
+        "✨ <b>¡Bienvenido a la IA!</b> ✨\n\n"
+        "🔹 Si quieres, visita nuestros canales con los botones de abajo.\n"
+        "💬 Después pulsa <b>«Ya me uní · continuar»</b> para empezar a chatear.\n\n"
+        "<i>Los canales son opcionales; el botón solo abre el acceso al bot.</i>"
+    )
 
 
 async def _require_access(update: Update, bot=None) -> bool:
     user = update.effective_user
     message = update.effective_message
-    if not user or not message or getattr(update.effective_chat, "type", None) != "private":
+    chat = update.effective_chat
+    if not user or not message or not chat or getattr(chat, "type", None) not in {"private", "group", "supergroup"}:
         return False
     if user.id not in _JOIN_CONFIRMED:
-        await message.reply_text(_join_text(), reply_markup=_join_keyboard())
+        await message.reply_text(_join_text(), reply_markup=_join_keyboard(), parse_mode=ParseMode.HTML)
         return False
     return True
+
+
+async def _keep_typing(bot, chat_id: int) -> None:
+    """Refresh Telegram's short-lived typing indicator while the AI is working."""
+    while True:
+        try:
+            await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+        except Exception as exc:
+            log.debug("No se pudo mostrar typing en %s (%s)", chat_id, type(exc).__name__)
+            return
+        await asyncio.sleep(4)
 
 
 def _rate_allowed(user_id: int) -> bool:
@@ -91,10 +106,13 @@ def _rate_allowed(user_id: int) -> bool:
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message or getattr(update.effective_chat, "type", None) != "private":
+    if not update.effective_message:
         return
     if await _require_access(update, context.bot):
-        await update.effective_message.reply_text("✅ Ya tienes acceso. Envíame tu pregunta y responderé con la IA.")
+        await update.effective_message.reply_text(
+            "✅ <b>Ya tienes acceso.</b> Envíame tu pregunta y responderé con la IA.",
+            parse_mode=ParseMode.HTML,
+        )
 
 
 async def _verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -104,12 +122,15 @@ async def _verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.answer()
     # Es una confirmación visual: no se consulta la membresía de Telegram.
     _JOIN_CONFIRMED.add(update.effective_user.id)
-    await query.edit_message_text("✅ Listo. Ya puedes usar la IA enviando mensajes aquí.")
+    await query.edit_message_text(
+        "✅ <b>Acceso listo.</b> Ya puedes usar la IA enviando mensajes aquí.",
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def _reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.effective_user:
-        _HISTORY.pop(update.effective_user.id, None)
+    if update.effective_user and update.effective_chat:
+        _HISTORY.pop((update.effective_chat.id, update.effective_user.id), None)
     if update.effective_message:
         await update.effective_message.reply_text("✅ Conversación reiniciada.")
 
@@ -128,9 +149,11 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _rate_allowed(user.id):
         await message.reply_text("Has alcanzado el límite temporal de la IA. Inténtalo más tarde.")
         return
-    history = _HISTORY[user.id]
+    chat_id = update.effective_chat.id
+    history = _HISTORY[(chat_id, user.id)]
     history.append({"role": "user", "content": prompt})
     history[:] = history[-MAX_HISTORY:]
+    typing_task = asyncio.create_task(_keep_typing(context.bot, chat_id))
     try:
         payload, status = await asyncio.to_thread(dispatch_telegram_ai_chat, user.id, list(history))
         if status != 200 or not payload.get("ok"):
@@ -140,6 +163,12 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         log.exception("Fallo en IA del segundo bot")
         await message.reply_text("La IA no está disponible en este momento. Inténtalo de nuevo más tarde.")
         return
+    finally:
+        typing_task.cancel()
+        try:
+            await typing_task
+        except asyncio.CancelledError:
+            pass
     history.append({"role": "assistant", "content": answer})
     history[:] = history[-MAX_HISTORY:]
     await message.reply_text(answer[:4096])
@@ -154,7 +183,7 @@ def run_secondary_ai_bot() -> None:
             application.add_handler(CommandHandler("reset", _reset))
             application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
-            log.info("Segundo bot de IA iniciado; canales requeridos: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
+            log.info("Segundo bot de IA iniciado; canales promocionados: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
             application.run_polling(
                 drop_pending_updates=False,
                 bootstrap_retries=-1,
