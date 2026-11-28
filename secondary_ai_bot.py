@@ -9,9 +9,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
+import sys
 import threading
 import time
 from collections import defaultdict
+from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
@@ -162,8 +165,23 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await message.reply_text(answer[:4096])
 
 
-def start_secondary_ai_bot() -> threading.Thread | None:
-    """Arranca el segundo polling en un hilo, sin alterar el bot administrador."""
+def run_secondary_ai_bot() -> None:
+    """Ejecuta el polling del bot 2 en su propio proceso."""
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", _start))
+    application.add_handler(CommandHandler("reset", _reset))
+    application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
+    log.info("Segundo bot de IA iniciado; canales requeridos: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
+    application.run_polling(
+        drop_pending_updates=False,
+        bootstrap_retries=-1,
+        stop_signals=None,
+    )
+
+
+def start_secondary_ai_bot() -> subprocess.Popen | None:
+    """Arranca el polling del bot 2 en un proceso separado del administrador."""
     if not TOKEN:
         log.info("Segundo bot de IA desactivado: falta TELEGRAM_AI_BOT_TOKEN")
         return None
@@ -172,22 +190,10 @@ def start_secondary_ai_bot() -> threading.Thread | None:
         log.error("Segundo bot desactivado: el token del bot 2 no puede reutilizar TELEGRAM_BOT_TOKEN")
         return None
 
-    def runner() -> None:
-        application = Application.builder().token(TOKEN).build()
-        application.add_handler(CommandHandler("start", _start))
-        application.add_handler(CommandHandler("reset", _reset))
-        application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
-        log.info("Segundo bot de IA iniciado; canales requeridos: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
-        try:
-            application.run_polling(
-                drop_pending_updates=False,
-                bootstrap_retries=-1,
-                stop_signals=None,
-            )
-        except Exception:
-            log.exception("El segundo bot de IA no pudo mantener el polling")
+    process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--run-secondary-ai-bot"])
+    log.info("Proceso independiente del segundo bot de IA iniciado: pid=%s", process.pid)
+    return process
 
-    thread = threading.Thread(target=runner, name="secondary-ai-bot", daemon=True)
-    thread.start()
-    return thread
+
+if __name__ == "__main__" and "--run-secondary-ai-bot" in sys.argv:
+    run_secondary_ai_bot()
