@@ -1,6 +1,49 @@
 import asyncio
+from types import SimpleNamespace
 
 import bot
+
+
+def test_delegated_admin_can_start_broadcast_and_apk_announcement(monkeypatch):
+    class FakeQuery:
+        def __init__(self, data):
+            self.data = data
+            self.answers = []
+            self.edits = []
+            self.message = SimpleNamespace(edit_text=self._edit_text)
+
+        async def answer(self, *args, **kwargs):
+            self.answers.append((args, kwargs))
+
+        async def _edit_text(self, text, **kwargs):
+            self.edits.append((text, kwargs))
+
+    async def run_action(callback_data):
+        query = FakeQuery(callback_data)
+        context = SimpleNamespace(user_data={})
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=12345),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+        await bot.button_callback(update, context)
+        return query, context
+
+    monkeypatch.setattr(bot, "is_private_update", lambda _update: True)
+    monkeypatch.setattr(bot, "is_user_blocked", lambda _user_id: False)
+    monkeypatch.setattr(bot, "register_user", lambda _user: None)
+    monkeypatch.setattr(bot, "is_admin", lambda _user_id: True)
+    monkeypatch.setattr(bot, "is_owner", lambda _user_id: False)
+
+    broadcast_query, broadcast_context = asyncio.run(run_action("admin:broadcast:users"))
+    assert broadcast_context.user_data["admin_state"] == {
+        "step": "broadcast_text", "destination": "users"
+    }
+    assert "Acción solo para el administrador" not in str(broadcast_query.answers)
+
+    apk_query, apk_context = asyncio.run(run_action("admin:apk_announcement:start"))
+    assert apk_context.user_data["admin_state"] == {"step": "apk_title"}
+    assert "Acción solo para el administrador" not in str(apk_query.answers)
 
 
 def test_broadcast_button_url_validation():

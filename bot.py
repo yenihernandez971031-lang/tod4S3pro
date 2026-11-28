@@ -6019,7 +6019,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             await edit_query_message_text(query.message, card("✅ ᴀɴᴜɴᴄɪᴏ ʀᴇᴛɪʀᴀᴅᴏ", ["Ya no quedan anuncios publicados en la aplicación."]), reply_markup=InlineKeyboardMarkup([[btn("Volver a Comunicación", callback_data="admin:menu:comms")]]))
         return
     if query.data.startswith("admin:apk_announcement:") or query.data.startswith("admin:apk_survey:"):
-        if not is_owner(user.id) or not update.effective_chat or update.effective_chat.type != "private":
+        if not is_admin(user.id) or not update.effective_chat or update.effective_chat.type != "private":
             await query.answer(sc("Acción solo para el administrador"), show_alert=True)
             return
         action = query.data.rsplit(":", 1)[-1]
@@ -6067,7 +6067,7 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
     if query.data.startswith("admin:broadcast:"):
         chat = update.effective_chat
-        if not is_owner(user.id) or not chat or chat.type != "private":
+        if not is_admin(user.id) or not chat or chat.type != "private":
             await query.answer(sc("Acción solo para el administrador"), show_alert=True)
             return
         action = query.data.rsplit(":", 1)[-1]
