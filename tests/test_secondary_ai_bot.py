@@ -64,6 +64,9 @@ class FakeBot:
     async def get_chat_member(self, chat_id, user_id):
         return SimpleNamespace(status=self.memberships.get(chat_id, "member"), is_member=True)
 
+    async def get_me(self):
+        return SimpleNamespace(username="ai_test_bot")
+
 
 class FakeBroadcaster(FakeBot):
     def __init__(self):
@@ -184,7 +187,13 @@ def test_group_ai_response_shows_typing_and_visible_working_message(monkeypatch)
         assert bot.actions == [(chat_id, secondary.ChatAction.TYPING)]
         progress = update.effective_message.sent[0]
         assert "está trabajando" in progress.text
-        assert progress.edits[-1][0] == "Respuesta de prueba"
+        assert progress.edits[-1][0].startswith("Respuesta de prueba")
+        assert "Te quedan" in progress.edits[-1][0]
+        assert any(
+            button.callback_data == "secondary:user:quota"
+            for row in progress.edits[-1][1]["reply_markup"].inline_keyboard
+            for button in row
+        )
         assert (chat_id, user_id) in secondary._HISTORY
 
     asyncio.run(run())
@@ -552,7 +561,7 @@ def test_chat_trims_long_history_before_sending_it_to_backend(monkeypatch, tmp_p
         assert sum(len(item["content"]) for item in messages) <= secondary.MAX_CONTEXT_CHARS
         assert messages[-1] == {"role": "user", "content": "Pregunta actual"}
         assert all(len(item["content"]) <= 4000 for item in messages)
-        assert update.effective_message.sent[0].edits[-1][0] == "Respuesta"
+        assert update.effective_message.sent[0].edits[-1][0].startswith("Respuesta")
 
     asyncio.run(run())
 
@@ -633,6 +642,11 @@ def test_referral_reward_is_unique_and_adds_one_question_up_to_cap(monkeypatch, 
     assert secondary._USERS[inviter]["referral_bonus"] == secondary.MAX_REFERRAL_BONUS
     assert secondary._USERS[inviter]["referrals"] == [invited]
     assert secondary._question_limit(inviter) == secondary.QUESTION_LIMIT + secondary.MAX_REFERRAL_BONUS
+    secondary._USERS.pop(inviter, None)
+    secondary._USERS.pop(invited, None)
+    secondary._load_state()
+    assert secondary._USERS[inviter]["referrals_count"] == 1
+    assert secondary._USERS[inviter]["referral_bonus"] == secondary.MAX_REFERRAL_BONUS
 
 
 def test_chat_history_is_persisted_in_bot_state_and_shown_to_admin(monkeypatch, tmp_path):
@@ -672,3 +686,34 @@ def test_quota_status_includes_referral_questions():
             secondary._QUESTIONS.pop(user_id, None)
         else:
             secondary._QUESTIONS[user_id] = old_questions
+
+
+def test_user_buttons_open_remaining_quota_and_referral_share_link():
+    async def run():
+        user_id = 987_005
+        secondary._JOIN_CONFIRMED.add(user_id)
+        secondary._USERS[user_id] = {"referrals_count": 3, "referral_bonus": 2}
+        secondary._QUESTIONS.pop(user_id, None)
+        for action in ("quota", "referrals"):
+            query = FakeQuery(f"secondary:user:{action}")
+            update = SimpleNamespace(
+                callback_query=query,
+                effective_user=SimpleNamespace(id=user_id),
+                effective_chat=SimpleNamespace(type="private"),
+            )
+            await secondary._user_callback(update, SimpleNamespace(bot=FakeBot()))
+            assert query.edited
+            text, options = query.edited[0]
+            assert options["reply_markup"] is not None
+            if action == "quota":
+                assert "12/12" in text
+            else:
+                assert "Invitaciones confirmadas: <b>3</b>" in text
+                assert "Preguntas adicionales por referidos: <b>2/10</b>" in text
+                assert any(
+                    button.url and "t.me/share/url" in button.url
+                    for row in options["reply_markup"].inline_keyboard
+                    for button in row
+                )
+
+    asyncio.run(run())

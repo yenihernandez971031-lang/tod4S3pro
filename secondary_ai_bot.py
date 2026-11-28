@@ -19,6 +19,7 @@ from collections import defaultdict
 from html import escape
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ParseMode
@@ -188,6 +189,16 @@ def _join_keyboard() -> InlineKeyboardMarkup:
     if CHANNEL_TWO_URL:
         rows.append([InlineKeyboardButton("🟣 Abrir canal secundario", url=CHANNEL_TWO_URL, style="success")])
     rows.append([InlineKeyboardButton("✅ Ya me uní · continuar", callback_data="secondary:verify", style="success")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _user_keyboard(referral_share_url: str | None = None) -> InlineKeyboardMarkup:
+    rows = [[
+        InlineKeyboardButton("📊 Mis preguntas", callback_data="secondary:user:quota", style="primary"),
+        InlineKeyboardButton("👥 Mis referidos", callback_data="secondary:user:referrals", style="success"),
+    ]]
+    if referral_share_url:
+        rows.append([InlineKeyboardButton("📤 Compartir invitación", url=referral_share_url, style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -718,6 +729,7 @@ async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text(
             "✅ <b>Ya tienes acceso.</b> Envíame tu pregunta y responderé con la IA."
             + ("\n🎁 Tu invitación fue registrada; el invitador recibió una pregunta extra." if rewarded else ""),
+            reply_markup=_user_keyboard() if update.effective_chat.type == "private" else None,
             parse_mode=ParseMode.HTML,
         )
 
@@ -753,6 +765,11 @@ async def _verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await query.edit_message_text(
         "✅ <b>Acceso listo.</b> Ya puedes usar la IA enviando mensajes aquí."
         + ("\n🎁 La invitación quedó confirmada; tu invitador recibió una pregunta extra." if rewarded else ""),
+        reply_markup=(
+            _user_keyboard()
+            if getattr(getattr(update, "effective_chat", None), "type", None) == "private"
+            else None
+        ),
         parse_mode=ParseMode.HTML,
     )
 
@@ -766,22 +783,16 @@ async def _reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.effective_message.reply_text("✅ Conversación reiniciada.")
 
 
-async def _quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _require_access(update, context.bot):
-        return
-    user_id = update.effective_user.id
+def _quota_text(user_id: int) -> str:
     remaining, wait_seconds = _quota_status(user_id)
     text = f"📊 Te quedan <b>{remaining}/{_question_limit(user_id)}</b> preguntas en tu ventana móvil de 10 horas."
     if remaining == 0:
         minutes = int(wait_seconds // 60)
         text += f"\n⏳ Próxima pregunta disponible en aproximadamente {minutes // 60} h {minutes % 60} min."
-    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+    return text
 
 
-async def _referrals_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _require_access(update, context.bot):
-        return
-    user_id = update.effective_user.id
+async def _referral_view(user_id: int, bot) -> tuple[str, InlineKeyboardMarkup]:
     info = _USERS.get(user_id, {})
     invitees = info.get("referrals", [])
     try:
@@ -789,22 +800,72 @@ async def _referrals_command(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except (TypeError, ValueError):
         count = len(invitees) if isinstance(invitees, list) else 0
     try:
-        bot_info = await context.bot.get_me()
+        bot_info = await bot.get_me()
         username = str(getattr(bot_info, "username", "") or "").lstrip("@")
     except Exception:
         username = ""
     if not re.fullmatch(r"[A-Za-z0-9_]{5,32}", username):
-        await update.effective_message.reply_text("No pude obtener el enlace ahora; inténtalo de nuevo más tarde.")
-        return
+        return "No pude generar tu enlace ahora. Inténtalo de nuevo más tarde.", _user_keyboard()
     bonus = _question_limit(user_id) - QUESTION_LIMIT
     link = f"https://t.me/{username}?start=ref_{user_id}"
-    await update.effective_message.reply_text(
+    share_url = "https://t.me/share/url?url=" + quote(link, safe="") + "&text=" + quote("¡Únete al bot de IA!", safe="")
+    text = (
         "👥 <b>Tus referidos</b>\n"
         f"Invitaciones confirmadas: <b>{count}</b>\n"
         f"Preguntas adicionales por referidos: <b>{bonus}/{MAX_REFERRAL_BONUS}</b>\n\n"
-        "Comparte este enlace. Se confirma cuando la persona abre el bot y pulsa continuar:\n"
-        f"<code>{escape(link)}</code>\n\n"
-        "Cada cuenta nueva confirmada suma 1 pregunta cada 10 horas, hasta 10 preguntas extra.",
+        "Cada persona que se una a los dos canales y confirme su acceso suma 1 pregunta cada 10 horas, hasta 10 extras.\n\n"
+        f"Tu enlace: <code>{escape(link)}</code>"
+    )
+    return text, _user_keyboard(share_url)
+
+
+async def _quota_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_access(update, context.bot):
+        return
+    if update.effective_chat.type != "private":
+        await update.effective_message.reply_text("Abre el bot en privado para consultar tu cuota.")
+        return
+    await update.effective_message.reply_text(
+        _quota_text(update.effective_user.id),
+        reply_markup=_user_keyboard(),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def _user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    chat = update.effective_chat
+    if not query:
+        return
+    if not user or not chat or chat.type != "private" or user.id in _BANNED_USERS:
+        await query.answer("No disponible.", show_alert=True)
+        return
+    if user.id not in _JOIN_CONFIRMED and user.id not in ADMIN_USER_IDS:
+        await query.answer("Primero verifica tu acceso en los dos canales con /start.", show_alert=True)
+        return
+    action = str(query.data or "").removeprefix("secondary:user:")
+    if action not in {"quota", "referrals"}:
+        await query.answer("Opción no válida.", show_alert=True)
+        return
+    await query.answer()
+    if action == "quota":
+        text, keyboard = _quota_text(user.id), _user_keyboard()
+    else:
+        text, keyboard = await _referral_view(user.id, context.bot)
+    await query.edit_message_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+
+
+async def _referrals_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not await _require_access(update, context.bot):
+        return
+    if update.effective_chat.type != "private":
+        await update.effective_message.reply_text("Abre el bot en privado para consultar y compartir tus referidos.")
+        return
+    text, keyboard = await _referral_view(update.effective_user.id, context.bot)
+    await update.effective_message.reply_text(
+        text,
+        reply_markup=keyboard,
         parse_mode=ParseMode.HTML,
     )
 
@@ -872,13 +933,15 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     history[:] = history[-MAX_STORED_MESSAGES:]
     with _RATE_LOCK:
         _save_state_locked()
-    await progress_message.edit_text(
-        _format_answer_for_telegram(answer[:3900]),
-        parse_mode=ParseMode.HTML,
-    )
+    response_text = _format_answer_for_telegram(answer[:3900])
     if not is_admin:
         remaining, _ = _quota_status(user.id)
-        await message.reply_text(f"📊 Te quedan {remaining}/{_question_limit(user.id)} preguntas en 10 horas.")
+        response_text += f"\n\n<i>Te quedan {remaining}/{_question_limit(user.id)} preguntas en 10 horas.</i>"
+    await progress_message.edit_text(
+        response_text,
+        reply_markup=None if is_admin else _user_keyboard(),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 def run_secondary_ai_bot() -> None:
@@ -892,6 +955,7 @@ def run_secondary_ai_bot() -> None:
             application.add_handler(CommandHandler(["cuota", "preguntas"], _quota_command))
             application.add_handler(CommandHandler(["referidos", "invitar"], _referrals_command))
             application.add_handler(CallbackQueryHandler(_admin_callback, pattern=r"^secondary:admin:"))
+            application.add_handler(CallbackQueryHandler(_user_callback, pattern=r"^secondary:user:"))
             application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _admin_text))
             log.info("Segundo bot de IA iniciado; canales promocionados: %s y %s", CHANNEL_ONE, CHANNEL_TWO)

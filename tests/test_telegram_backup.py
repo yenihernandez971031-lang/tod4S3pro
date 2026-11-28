@@ -174,7 +174,10 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             source_state = root / "source" / state_key
             target_state = root / "target" / state_key
             user_state = {
-                "users": {"321": {"first_name": "Prueba", "private_chat_id": 321}},
+                "users": {"321": {
+                    "first_name": "Prueba", "private_chat_id": 321,
+                    "referrals": [654], "referrals_count": 1, "referral_bonus": 1,
+                }},
                 "banned_users": [],
                 "questions": {"321": [1800000000.0]},
                 "history": {"321:321": [{"role": "user", "content": "Pregunta guardada"}]},
@@ -191,6 +194,9 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertGreaterEqual(restored, 1)
             restored_state = json.loads(target_state.read_text(encoding="utf-8"))
             self.assertEqual(restored_state["users"]["321"]["first_name"], "Prueba")
+            self.assertEqual(restored_state["users"]["321"]["referrals_count"], 1)
+            self.assertEqual(restored_state["users"]["321"]["referral_bonus"], 1)
+            self.assertEqual(restored_state["users"]["321"]["referrals"], [654])
             self.assertEqual(restored_state["questions"]["321"], [1800000000.0])
             self.assertEqual(
                 restored_state["history"]["321:321"][0]["content"],
