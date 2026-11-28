@@ -17,16 +17,22 @@ from collections import defaultdict
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.error import InvalidToken
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
 from web_store import dispatch_telegram_ai_chat
 
 log = logging.getLogger("secondary-ai-bot")
 
-TOKEN = (
-    os.getenv("TELEGRAM_AI_BOT_TOKEN", "").strip()
-    or os.getenv("SECONDARY_TELEGRAM_BOT_TOKEN", "").strip()
-)
+def _configured_token() -> str:
+    for name in ("TELEGRAM_AI_BOT_TOKEN", "SECONDARY_TELEGRAM_BOT_TOKEN"):
+        value = os.getenv(name, "").strip().strip("\"'").strip()
+        if value:
+            return value
+    return ""
+
+
+TOKEN = _configured_token()
 # Canales obligatorios del bot 2; no requieren variables de entorno adicionales.
 CHANNEL_ONE = "@Dark_Zone_666"
 CHANNEL_TWO = "@darzPrbo"
@@ -167,17 +173,26 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def run_secondary_ai_bot() -> None:
     """Ejecuta el polling del bot 2 en su propio proceso."""
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", _start))
-    application.add_handler(CommandHandler("reset", _reset))
-    application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
-    log.info("Segundo bot de IA iniciado; canales requeridos: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
-    application.run_polling(
-        drop_pending_updates=False,
-        bootstrap_retries=-1,
-        stop_signals=None,
-    )
+    while True:
+        try:
+            application = Application.builder().token(TOKEN).build()
+            application.add_handler(CommandHandler("start", _start))
+            application.add_handler(CommandHandler("reset", _reset))
+            application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
+            application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
+            log.info("Segundo bot de IA iniciado; canales requeridos: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
+            application.run_polling(
+                drop_pending_updates=False,
+                bootstrap_retries=-1,
+                stop_signals=None,
+            )
+            return
+        except InvalidToken:
+            log.error("Telegram rechazó el token del bot 2. Revisa TELEGRAM_AI_BOT_TOKEN en Railway.")
+            return
+        except Exception:
+            log.exception("Fallo temporal del segundo bot; se reintentará en 10 segundos")
+            time.sleep(10)
 
 
 def start_secondary_ai_bot() -> subprocess.Popen | None:
