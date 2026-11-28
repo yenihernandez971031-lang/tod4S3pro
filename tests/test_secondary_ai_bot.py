@@ -297,6 +297,12 @@ def test_secondary_bot_refuses_admin_token(monkeypatch):
     assert secondary.start_secondary_ai_bot() is None
 
 
+def test_secondary_application_processes_updates_concurrently(monkeypatch):
+    monkeypatch.setattr(secondary, "TOKEN", "123456:FAKE-TOKEN-ONLY-FOR-TESTS")
+    application = secondary._build_secondary_application()
+    assert application.update_processor.max_concurrent_updates == 16
+
+
 def test_secondary_child_uses_the_backup_state_file(monkeypatch, tmp_path):
     monkeypatch.setattr(secondary, "TOKEN", "secondary-test-token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "primary-test-token")

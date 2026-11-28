@@ -821,6 +821,7 @@ async def _admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    log.info("El bot IA recibió /start")
     _refresh_admin_user_ids()
     if not update.effective_message or not update.effective_user or not update.effective_chat:
         return
@@ -1170,11 +1171,16 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+def _build_secondary_application() -> Application:
+    """Permite que comandos como /start no esperen una consulta de IA lenta."""
+    return Application.builder().token(TOKEN).concurrent_updates(16).build()
+
+
 def run_secondary_ai_bot() -> None:
     """Ejecuta el polling del bot 2 en su propio proceso."""
     while True:
         try:
-            application = Application.builder().token(TOKEN).build()
+            application = _build_secondary_application()
             application.add_handler(CommandHandler("admin", _admin))
             application.add_handler(CommandHandler("start", _start))
             application.add_handler(CommandHandler("reset", _reset))
