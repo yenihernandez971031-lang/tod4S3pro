@@ -245,7 +245,7 @@ def card(
         return f"┃ {value}{' ' * padding}"
 
     rendered_title = title if preserve_title else sc(title)
-    out = [CARD_TOP, box_content(rendered_title), CARD_MID]
+    out = [CARD_TOP, box_content(rendered_title), box_content("୨୧ ˚ ✿ ˚ ୨୧"), CARD_MID]
     for line in lines:
         if line == "":
             out.append(box_content(""))
@@ -991,7 +991,19 @@ def record_admin_audit(
 
 def admin_report_text() -> str:
     events = _load_json(ADMIN_AUDIT_FILE).get("events", [])
-    lines = ["ᴜ́ʟᴛɪᴍᴀꜱ ᴀᴄᴄɪᴏɴᴇꜱ ᴅᴇʟ ᴀᴅᴍɪɴ", ""]
+    users_data = _load_json(USERS_DATA_FILE).get("users", {})
+    users = users_data if isinstance(users_data, dict) else {}
+    confirmed_referrals = sum(
+        1 for entry in users.values()
+        if isinstance(entry, dict) and entry.get("referred_by")
+    )
+    lines = [
+        "🌸 ʀᴇꜰᴇʀɪᴅᴏꜱ ᴄᴏɴꜰɪʀᴍᴀᴅᴏꜱ",
+        f"🎀 Total de invitaciones acreditadas: {confirmed_referrals}",
+        "",
+        "ᴜ́ʟᴛɪᴍᴀꜱ ᴀᴄᴄɪᴏɴᴇꜱ ᴅᴇʟ ᴀᴅᴍɪɴ",
+        "",
+    ]
     for event in events[:12]:
         plan = get_plan_info(event.get("plan", "free"))
         duration = event.get("days") or "∞"
@@ -2908,8 +2920,8 @@ def btn(text: str, **kwargs) -> InlineKeyboardButton:
 
 def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("📥 DESCARGAS", callback_data="downloads", style="success")],
-        [InlineKeyboardButton("📲 ENVIARME ACTUALIZACIÓN", callback_data="app:send_update", style="success")],
+        [InlineKeyboardButton("🌸 DESCARGAS", callback_data="downloads", style="success")],
+        [InlineKeyboardButton("✨ ENVIARME ACTUALIZACIÓN", callback_data="app:send_update", style="success")],
     ]
 
     app_button = InlineKeyboardButton(
@@ -2922,7 +2934,7 @@ def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
         rows.append([
             app_button,
             InlineKeyboardButton(
-                "🛠️ HERRAMIENTAS PREMIUM", callback_data="premium:tools", style="success"
+                "💎 HERRAMIENTAS PREMIUM", callback_data="premium:tools", style="success"
             ),
         ])
     else:
@@ -2930,25 +2942,25 @@ def main_keyboard(user_id: int | None = None) -> InlineKeyboardMarkup:
 
     rows.extend([
         [InlineKeyboardButton(
-            f"💰 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
+            f"🎀 SALDO: {get_user_balance(user_id) if user_id is not None else 0}$ · REFERIDOS",
             callback_data="balance", style="primary",
         )],
         [InlineKeyboardButton("📋 COLA", callback_data="open_queue", style="primary"),
          InlineKeyboardButton("📒 HISTORIAL", callback_data="open_history", style="primary")],
-        [InlineKeyboardButton("📊 MI CUOTA", callback_data="my_quota", style="primary"),
+        [InlineKeyboardButton("🌷 MI CUOTA", callback_data="my_quota", style="primary"),
          InlineKeyboardButton("🏆 TOP USUARIOS", callback_data="top:users", style="primary")],
-        [InlineKeyboardButton("❓ AYUDA", callback_data="help:0", style="primary"),
-         InlineKeyboardButton("💬 SOPORTE", callback_data="support", style="primary")],
+        [InlineKeyboardButton("❔ AYUDA", callback_data="help:0", style="primary"),
+         InlineKeyboardButton("💌 SOPORTE", callback_data="support", style="primary")],
     ])
 
     service_button = InlineKeyboardButton(
-        "ℹ️ SERVICIO TODUS S3", callback_data="service_info", style="primary"
+        "🌙 SERVICIO TODUS S3", callback_data="service_info", style="primary"
     )
     if user_id is not None and is_admin(user_id):
         rows.append([
             service_button,
             InlineKeyboardButton(
-                "⚙️ PANEL DE CREADOR", callback_data="admin:open", style="primary"
+                "🧁 PANEL DE CREADOR", callback_data="admin:open", style="primary"
             ),
         ])
     else:
@@ -2997,22 +3009,23 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
         lines = [
             *_active_plan_summary_lines(user_id),
             "",
-            f"💰 Saldo de referidos: {balance}$",
+            f"🎀 Saldo de referidos: {balance}$",
             "Tu cuenta Creador conserva los datos ilimitados; no necesita comprar paquetes.",
             "👥 Cada referido válido te da 5$.",
             "",
-            f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
+            "💌 Invita a tus amistades con tu enlace personal:",
+            f"{{mono:{link}}}",
         ]
     else:
         lines = [
             *_active_plan_summary_lines(user_id),
             "",
-            f"💰 Saldo de referidos: {balance}$",
+            f"🎀 Saldo de referidos: {balance}$",
             "",
             "🎁 Recibes 1 GB gratis",
             "y 5$ de bienvenida.",
             "El 1 GB gratuito se renueva cada 24 h.",
-            "👥 Cada referido válido te da 5$.",
+            "🌷 Cada amistad que complete la verificación te da 5$.",
             "Los paquetes no vencen y se descuentan al completar transferencias.",
             "",
             "📋 Compra con saldo de referidos:",
@@ -3027,7 +3040,8 @@ def plans_text(user_id: int, bot_username: str | None = None) -> str:
             "Activación Premium con el administrador.",
             "Paquetes con saldo de referidos.",
             "",
-            f"🔗 Tu enlace copiable:\n{{mono:{link}}}",
+            "💌 Invita a tus amistades con tu enlace personal:",
+            f"{{mono:{link}}}",
         ]
     return f"{card('👥 ʀᴇꜰᴇʀɪᴅᴏꜱ ʏ ꜱᴀʟᴅᴏ', lines)}\n\n{BOT_FOOTER}"
 
@@ -3038,8 +3052,8 @@ def plans_keyboard(user_id: int, bot_username: str | None = None) -> InlineKeybo
         "Únete a TodusS3 Bot y recibe 1 GB gratis y 5$ de saldo.", safe=""
     )
     rows = [
-        [btn("📤 ᴄᴏᴍᴘᴀʀᴛɪʀ ᴇʟ ʙᴏᴛ", url=share_url),
-         btn("📋 ᴄᴏᴘɪᴀʀ ᴍɪ ᴇɴʟᴀᴄᴇ", copy_text=CopyTextButton(text=link))],
+        [btn("💌 ᴄᴏᴍᴘᴀʀᴛɪʀ ᴇʟ ʙᴏᴛ", url=share_url),
+         btn("🎀 ᴄᴏᴘɪᴀʀ ᴍɪ ᴇɴʟᴀᴄᴇ", copy_text=CopyTextButton(text=link))],
     ]
     if not is_owner(user_id):
         packages = list(DATA_PACKAGES.items())
@@ -5058,13 +5072,13 @@ def membership_keyboard(
 ) -> InlineKeyboardMarkup:
     join_buttons = []
     if CHANNEL_JOIN_URL:
-        join_buttons.append(btn(f"📢 {channel_label}", url=CHANNEL_JOIN_URL, style="success"))
+        join_buttons.append(btn(f"🌸 {channel_label}", url=CHANNEL_JOIN_URL, style="success"))
     if GROUP_JOIN_URL:
-        join_buttons.append(btn(f"👥 {group_label}", url=GROUP_JOIN_URL, style="success"))
+        join_buttons.append(btn(f"🐰 {group_label}", url=GROUP_JOIN_URL, style="success"))
     if TODUS_CHANNEL_JOIN_URL:
         join_buttons.append(btn(f"☁️ {todus_label}", url=TODUS_CHANNEL_JOIN_URL, style="success"))
     rows = [join_buttons[index:index + 2] for index in range(0, len(join_buttons), 2)]
-    rows.append([btn("✅ Continuar al bot", callback_data="membership:verify", style="primary")])
+    rows.append([btn("✅ ᴄᴏɴᴛɪɴᴜᴀʀ ᴀʟ ʙᴏᴛ", callback_data="membership:verify", style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -5073,17 +5087,17 @@ def membership_prompt_text(
     group_label: str = "grupo de soporte",
     todus_label: str = "canal ToDusS3",
 ) -> str:
-    return card("🌐 ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", [
-        "Únete a nuestros canales oficiales",
-        "para utilizar el servicio de",
-        "descargas ToDusS3.",
+    return card("🌸 ᴄᴀɴᴀʟᴇꜱ ᴏꜰɪᴄɪᴀʟᴇꜱ", [
+        "¡Qué bueno tenerte aquí!",
+        "Únete a nuestros espacios oficiales",
+        "para activar el bot.",
         "",
         f"1️⃣ {channel_label}",
         f"2️⃣ {group_label}",
         f"3️⃣ {todus_label}",
         "",
         "Después de unirte a todos,",
-        "Pulsa Continuar al bot ✅.",
+        "pulsa Continuar al bot ✨.",
     ])
 
 
@@ -5549,6 +5563,8 @@ async def send_latest_app_release(update: Update, context: ContextTypes.DEFAULT_
     user = update.effective_user
     if not message or not chat or not user:
         return None
+    if not is_app_support_group(chat):
+        return None
     try:
         release = await latest_android_release(context.application, max_bytes=200 * MIB)
     except Exception as exc:
@@ -5650,7 +5666,7 @@ async def send_app_support_answer(update: Update, context: ContextTypes.DEFAULT_
     message = update.effective_message
     chat = update.effective_chat
     user = update.effective_user
-    if not message or not chat or not user:
+    if not message or not chat or not user or not is_app_support_group(chat):
         return
     markup = app_support_keyboard(context.application.bot_data.get("bot_username"))
     await message.reply_text(answer, reply_markup=markup, disable_web_page_preview=True)
@@ -5663,7 +5679,7 @@ async def handle_app_support_keywords(update: Update, context: ContextTypes.DEFA
     if not message or not user or not chat or getattr(user, "is_bot", False):
         return
     is_group = getattr(chat, "type", None) in {"group", "supergroup"}
-    if not is_group:
+    if not is_group or not is_app_support_group(chat):
         return
 
     intent = classify_app_support_intent(message.text or "")
@@ -9144,6 +9160,15 @@ async def post_init(application: Application) -> None:
             log.info("Respaldo confirmado después de conectar el bot.")
         except Exception as exc:
             log.warning("No se pudo confirmar el respaldo después de conectar (%s).", type(exc).__name__)
+    # El proceso secundario debe leer el estado solo después de restaurar la
+    # copia compartida; iniciarlo en main() podía cargar un JSON vacío antes del restore.
+    try:
+        from secondary_ai_bot import start_secondary_ai_bot
+        application.bot_data["secondary_ai_bot_process"] = start_secondary_ai_bot(
+            SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE
+        )
+    except Exception:
+        log.exception("No se pudo iniciar el segundo bot de IA después de restaurar el backup")
     if application.bot_data.get("task_queue"):
         ensure_task_workers(application)
         application.bot_data["task_worker_supervisor"] = asyncio.create_task(
@@ -9711,13 +9736,6 @@ def main() -> None:
         start_store_server(profile_checker=sync_app_profile, profile_photo_checker=sync_app_profile_photo)
     except Exception:
         log.exception("No se pudo iniciar la tienda web de Railway")
-    try:
-        from secondary_ai_bot import start_secondary_ai_bot
-        start_secondary_ai_bot(SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE)
-    except Exception:
-        # El bot administrador debe seguir funcionando aunque el bot de IA
-        # secundario tenga una configuración incompleta o falle al arrancar.
-        log.exception("No se pudo iniciar el segundo bot de IA")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN.strip()
     if not token:
         raise RuntimeError("Falta TELEGRAM_BOT_TOKEN en el entorno o archivo")

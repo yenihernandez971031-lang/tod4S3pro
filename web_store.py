@@ -56,6 +56,18 @@ _AI_ACCOUNT_RATE_LOCK = Lock()
 _AI_ACCOUNT_REQUESTS: dict[str, list[float]] = {}
 _AI_ACCOUNT_DAILY_REQUESTS: dict[str, list[float]] = {}
 _AI_LOGIN_ATTEMPTS: dict[str, list[float]] = {}
+_TELEGRAM_AI_PERSONA_INSTRUCTIONS = {
+    "writer": "Prioriza la escritura creativa y la edición de textos, respetando la intención del usuario.",
+    "programmer": "Ayuda con programación paso a paso y da ejemplos completos, ejecutables y seguros.",
+    "teacher": "Enseña con paciencia mediante explicaciones sencillas, ejemplos y comprobaciones de comprensión.",
+    "friend": "Usa un tono cálido, respetuoso y alentador; deja claro que eres una IA y no un profesional clínico.",
+    "creative": "Usa imaginación para ideas, historias y juegos de rol claramente ficticios.",
+}
+_TELEGRAM_AI_TEMPERATURES = {
+    "precise": (0.2, "Mantén una creatividad baja y prioriza respuestas concretas y consistentes."),
+    "balanced": (0.5, "Usa un equilibrio normal entre precisión y variedad."),
+    "creative": (0.8, "Puedes proponer más variedad e ideas originales, sin inventar hechos."),
+}
 
 
 def _notrack_web_session_cookie() -> str:
@@ -363,6 +375,8 @@ def dispatch_telegram_ai_chat(
     *,
     bypass_quota: bool = False,
     question_limit: int = 10,
+    persona: str = "normal",
+    temperature_profile: str = "balanced",
     on_delta: Callable[[str], None] | None = None,
 ) -> tuple[dict, int]:
     """Usa el proveedor de IA compartido; el bot secundario no recibe credenciales."""
@@ -413,12 +427,22 @@ def dispatch_telegram_ai_chat(
             else:
                 _AI_TELEGRAM_REQUESTS_BY_USER.pop(user_id, None)
 
+    persona_instruction = _TELEGRAM_AI_PERSONA_INSTRUCTIONS.get(persona, "") if isinstance(persona, str) else ""
+    temperature, temperature_instruction = _TELEGRAM_AI_TEMPERATURES.get(
+        temperature_profile, _TELEGRAM_AI_TEMPERATURES["balanced"]
+    ) if isinstance(temperature_profile, str) else _TELEGRAM_AI_TEMPERATURES["balanced"]
     system = (
         "Eres AiTod4S3. Responde en el idioma del usuario, con claridad y precisión. "
+        "Si preguntan quién creó, desarrolló o administra AiTod4S3, responde que el creador y administrador es @Niku_Blade "
+        "y que las novedades están en https://t.me/Dark_Zone_666. No atribuyas la creación a un proveedor técnico. "
+        "No menciones espontáneamente proveedores, API o modelos internos; si preguntan por detalles técnicos internos, "
+        "explica brevemente que no se comparten en el chat. "
         "No inventes datos ni solicites contraseñas, códigos, PIN, tokens o datos de pago. "
         "Responde directamente y de forma concisa. Si piden programación, incluye una solución ejecutable "
         "en un bloque Markdown con lenguaje, imports y uso cuando hagan falta; no omitas partes con puntos suspensivos. "
-        "Si piden información actual o fuentes, no inventes referencias."
+        "Si piden información actual o fuentes, no inventes referencias. "
+        + (f"Personalidad seleccionada: {persona_instruction} " if persona_instruction else "")
+        + f"Temperatura elegida: {temperature_instruction} "
     )
     request_messages = [{"role": "system", "content": system}, *clean]
     latest_prompt = clean[-1]["content"].lower()
@@ -441,7 +465,7 @@ def dispatch_telegram_ai_chat(
             return {"ok": False, "error": "ai_fallback_unavailable"}, 503
     request_body = json.dumps({
         "model": "notrack-uncensored", "messages": request_messages,
-        "max_tokens": 512 if code_request else 192, "temperature": 0.4, "stream": on_delta is not None,
+        "max_tokens": 512 if code_request else 192, "temperature": temperature, "stream": on_delta is not None,
     }, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         "https://api.notrack.ai/v1/chat/completions", data=request_body,
@@ -1010,6 +1034,9 @@ def delete_delivery_for_token(token: str, task_id: str) -> tuple[dict, int]:
     task_id = task_id.strip()
     row = sync_api.delivery_for_user(user_id, task_id)
     if row is None:
+        if sync_api.has_delivery_without_task_id(user_id):
+            return {"ok": False, "error": "legacy_delivery_incomplete",
+                    "message": "La entrega antigua está sin task_id; no se intentó borrar."}, 409
         return {"ok": False, "error": "delivery_not_found"}, 404
     if row.get("source", "tod4s3_bot") != "tod4s3_bot":
         return {"ok": False, "error": "delivery_source_not_supported",

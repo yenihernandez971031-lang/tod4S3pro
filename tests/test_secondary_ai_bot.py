@@ -101,7 +101,7 @@ def test_unconfirmed_chat_requires_both_channels_and_shows_styled_panel():
 
         assert not await secondary._require_access(update)
         text, options = update.effective_message.calls[0]
-        assert "¡Bienvenido a la IA!" in text
+        assert "¡Bienvenido a AiTod4S3!" in text
         assert "dos canales" in text
         assert options["reply_markup"] is not None
 
@@ -151,7 +151,7 @@ def test_verify_keeps_user_blocked_if_either_channel_membership_is_missing():
         )
         await secondary._verify(update, SimpleNamespace(bot=bot))
         assert user_id not in secondary._JOIN_CONFIRMED
-        assert "No pude confirmar" in query.edited[0][0]
+        assert "Aún no pude comprobar" in query.edited[0][0]
         assert query.edited[0][1]["reply_markup"] is not None
 
     asyncio.run(run())
@@ -265,7 +265,7 @@ def test_admin_statistics_button_opens_a_distinct_statistics_view():
     asyncio.run(run())
 
 
-def test_start_shows_admin_panel_entry_only_to_owner_in_private_chat():
+def test_start_shows_admin_panel_and_user_preferences_to_owner_in_private_chat():
     async def run():
         admin_id = next(iter(secondary.ADMIN_USER_IDS))
         admin_update = FakeUpdate(admin_id)
@@ -275,10 +275,17 @@ def test_start_shows_admin_panel_entry_only_to_owner_in_private_chat():
         assert "administrador" in text
         assert button.callback_data == "secondary:admin:open"
         assert button.style == "primary"
+        callbacks = {
+            item.callback_data
+            for row in options["reply_markup"].inline_keyboard
+            for item in row
+        }
+        assert "secondary:user:persona" in callbacks
+        assert "secondary:user:temperature" in callbacks
 
         stranger_update = FakeUpdate(654)
         await secondary._start(stranger_update, SimpleNamespace(bot=FakeBot()))
-        assert stranger_update.effective_message.calls[0][0].startswith("✨ <b>¡Bienvenido")
+        assert stranger_update.effective_message.calls[0][0].startswith("୨୧ ⋆｡˚ <b>¡Bienvenido")
         assert "secondary:admin:open" not in str(stranger_update.effective_message.calls[0][1])
 
     asyncio.run(run())
@@ -311,7 +318,7 @@ def test_secondary_child_uses_the_backup_state_file(monkeypatch, tmp_path):
 
 def test_secondary_bot_does_not_read_ai_provider_key():
     source = Path(secondary.__file__).read_text(encoding="utf-8")
-    assert "IASINCENSURA" not in source
+    assert 'os.getenv("IASINCENSURA"' not in source
     assert "dispatch_telegram_ai_chat" in source
 
 
@@ -742,10 +749,10 @@ def test_user_buttons_open_remaining_quota_and_referral_share_link():
             text, options = query.edited[0]
             assert options["reply_markup"] is not None
             if action == "quota":
-                assert "12/12" in text
+                assert "Te quedan <b>12/12 tokens</b>" in text
             else:
                 assert "Invitaciones confirmadas: <b>3</b>" in text
-                assert "Preguntas adicionales por referidos: <b>2/10</b>" in text
+                assert "Tokens extra: <b>2/10</b>" in text
                 assert any(
                     button.url and "t.me/share/url" in button.url
                     for row in options["reply_markup"].inline_keyboard
@@ -753,3 +760,188 @@ def test_user_buttons_open_remaining_quota_and_referral_share_link():
                 )
 
     asyncio.run(run())
+
+
+def test_admin_error_panel_explains_fallback_error_without_exposing_secrets():
+    previous = list(secondary._RECENT_ERRORS)
+    try:
+        secondary._RECENT_ERRORS[:] = [
+            "2026-11-28 20:02:45 UTC · RuntimeError · ai_fallback_unavailable:503"
+        ]
+        text = secondary._admin_errors_text()
+        assert "ai_fallback_unavailable:503" in text
+        assert "IASINCENSURA" in text
+        assert "NoTrack" in text
+        assert "no publiques ni compartas su valor" in text
+    finally:
+        secondary._RECENT_ERRORS[:] = previous
+
+
+def test_initial_quota_transitions_to_five_only_after_tenth_success(monkeypatch, tmp_path):
+    async def run():
+        user_id = 9_870_090
+        state_file = tmp_path / "quota-transition.json"
+        monkeypatch.setattr(secondary, "STATE_FILE", state_file)
+        secondary._QUESTIONS.pop(user_id, None)
+        secondary._RENEWAL_USERS.discard(user_id)
+        secondary._JOIN_CONFIRMED.add(user_id)
+        monkeypatch.setattr(
+            secondary,
+            "dispatch_telegram_ai_chat",
+            lambda *_args, **_kwargs: ({"ok": True, "reply": "Listo"}, 200),
+        )
+
+        for index in range(10):
+            update = FakeUpdate(user_id, text=f"Pregunta {index}")
+            await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
+            assert update.effective_message.sent[0].edits[-1][0].startswith("Listo")
+            if index < 9:
+                assert user_id not in secondary._RENEWAL_USERS
+        assert user_id in secondary._RENEWAL_USERS
+        assert secondary._question_limit(user_id) == 5
+        assert len(secondary._QUESTIONS[user_id]) == 10
+
+        # The phase survives a process restart through the persistent state file.
+        secondary._QUESTIONS.pop(user_id, None)
+        secondary._RENEWAL_USERS.discard(user_id)
+        secondary._load_state()
+        assert user_id in secondary._RENEWAL_USERS
+        assert secondary._question_limit(user_id) == 5
+
+    try:
+        asyncio.run(run())
+    finally:
+        secondary._QUESTIONS.pop(9_870_090, None)
+        secondary._RENEWAL_USERS.discard(9_870_090)
+        secondary._HISTORY.pop((9_870_090, 9_870_090), None)
+        secondary._JOIN_CONFIRMED.discard(9_870_090)
+
+
+def test_identity_questions_are_answered_without_calling_ai_backend(monkeypatch):
+    async def run():
+        user_id = 9_870_091
+        secondary._JOIN_CONFIRMED.add(user_id)
+        monkeypatch.setattr(
+            secondary,
+            "dispatch_telegram_ai_chat",
+            lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("No debe llamar a la IA")),
+        )
+        for question in (
+            "¿Quién creó el bot?", "¿Quién es el creador?", "¿Quién es el que mueve el bot?", "¿Qué modelo es?"
+        ):
+            update = FakeUpdate(user_id, text=question)
+            await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
+            response = update.effective_message.calls[0][0]
+            assert "@Niku_Blade" in response
+            assert "Dark Zone" in response
+            assert "NoTrack" not in response
+
+    try:
+        asyncio.run(run())
+    finally:
+        secondary._JOIN_CONFIRMED.discard(9_870_091)
+
+
+def test_personality_selector_saves_choice_to_shared_persistent_state(monkeypatch, tmp_path):
+    async def run():
+        user_id = 9_870_092
+        state_file = tmp_path / "bot_state.json"
+        monkeypatch.setattr(secondary, "STATE_FILE", state_file)
+        secondary._JOIN_CONFIRMED.add(user_id)
+        secondary._USERS[user_id] = {}
+
+        menu_query = FakeQuery("secondary:user:persona")
+        menu_update = SimpleNamespace(
+            callback_query=menu_query,
+            effective_user=SimpleNamespace(id=user_id),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+        await secondary._user_callback(menu_update, SimpleNamespace())
+        assert "Elige cómo quieres" in menu_query.edited[0][0]
+        writer_button = next(
+            button
+            for row in menu_query.edited[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "secondary:user:persona:set:writer"
+        )
+        assert "Escritor" in writer_button.text
+
+        choose_query = FakeQuery(writer_button.callback_data)
+        choose_update = SimpleNamespace(
+            callback_query=choose_query,
+            effective_user=SimpleNamespace(id=user_id),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+        await secondary._user_callback(choose_update, SimpleNamespace())
+        assert secondary._USERS[user_id]["persona"] == "writer"
+        assert "Escritor" in choose_query.edited[0][0]
+
+        temperature_menu = FakeQuery("secondary:user:temperature")
+        temperature_update = SimpleNamespace(
+            callback_query=temperature_menu,
+            effective_user=SimpleNamespace(id=user_id),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+        await secondary._user_callback(temperature_update, SimpleNamespace())
+        creative_button = next(
+            button
+            for row in temperature_menu.edited[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "secondary:user:temperature:set:creative"
+        )
+        assert "0.8" in creative_button.text
+        temperature_choice = FakeQuery(creative_button.callback_data)
+        temperature_update.callback_query = temperature_choice
+        await secondary._user_callback(temperature_update, SimpleNamespace())
+        assert secondary._USERS[user_id]["temperature"] == "creative"
+
+        secondary._USERS.pop(user_id, None)
+        secondary._load_state()
+        assert secondary._USERS[user_id]["persona"] == "writer"
+        assert secondary._USERS[user_id]["temperature"] == "creative"
+
+    try:
+        asyncio.run(run())
+    finally:
+        secondary._USERS.pop(9_870_092, None)
+        secondary._JOIN_CONFIRMED.discard(9_870_092)
+
+
+def test_personality_instructions_are_applied_by_ai_backend(monkeypatch):
+    monkeypatch.setenv("IASINCENSURA", "sk-notrack-test-key-for-telegram")
+    monkeypatch.setattr(web_store, "_AI_TELEGRAM_REQUESTS_BY_USER", {})
+    captured = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return json.dumps({"choices": [{"message": {"content": "Explicación"}}]}).encode()
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode())
+        return Response()
+
+    monkeypatch.setattr(web_store.urllib.request, "urlopen", fake_urlopen)
+    payload, status = web_store.dispatch_telegram_ai_chat(
+        9_870_093, [{"role": "user", "content": "Explícame las fracciones"}],
+        bypass_quota=True, persona="teacher", temperature_profile="creative",
+    )
+    assert status == 200 and payload["ok"]
+    assert "Enseña con paciencia" in captured["body"]["messages"][0]["content"]
+    assert "más variedad e ideas originales" in captured["body"]["messages"][0]["content"]
+    assert captured["body"]["temperature"] == 0.8
+
+
+def test_secondary_bot_is_started_only_after_primary_restore_logic():
+    import bot as primary
+
+    source = Path(primary.__file__).read_text(encoding="utf-8")
+    post_init = source[source.index("async def post_init("):source.index("def main()")]
+    main = source[source.index("def main()"):]
+    assert post_init.index("restore_backup_with_retries") < post_init.index("start_secondary_ai_bot")
+    assert "start_secondary_ai_bot(" not in main
