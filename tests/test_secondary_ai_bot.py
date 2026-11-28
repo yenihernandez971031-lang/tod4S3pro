@@ -743,6 +743,13 @@ def test_user_buttons_open_remaining_quota_and_referral_share_link():
         secondary._JOIN_CONFIRMED.add(user_id)
         secondary._USERS[user_id] = {"referrals_count": 3, "referral_bonus": 2}
         secondary._QUESTIONS.pop(user_id, None)
+        menu_labels = [
+            button.text
+            for row in secondary._user_keyboard().inline_keyboard
+            for button in row
+        ]
+        assert "🎟️ Mis tokens" in menu_labels
+        assert "💳 Mi saldo" not in menu_labels
         for action in ("quota", "referrals"):
             query = FakeQuery(f"secondary:user:{action}")
             update = SimpleNamespace(
@@ -755,6 +762,7 @@ def test_user_buttons_open_remaining_quota_and_referral_share_link():
             text, options = query.edited[0]
             assert options["reply_markup"] is not None
             if action == "quota":
+                assert "<b>Tus tokens</b>" in text
                 assert "Te quedan <b>12/12 tokens</b>" in text
             else:
                 assert "Invitaciones confirmadas: <b>3</b>" in text

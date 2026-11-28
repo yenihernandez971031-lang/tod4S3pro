@@ -222,7 +222,7 @@ def _join_keyboard() -> InlineKeyboardMarkup:
 
 def _user_keyboard(referral_share_url: str | None = None) -> InlineKeyboardMarkup:
     rows = [[
-        InlineKeyboardButton("💳 Mi saldo", callback_data="secondary:user:quota", style="primary"),
+        InlineKeyboardButton("🎟️ Mis tokens", callback_data="secondary:user:quota", style="primary"),
         InlineKeyboardButton("👥 Referidos", callback_data="secondary:user:referrals", style="success"),
     ]]
     rows.append([InlineKeyboardButton("🧠 Personalidad", callback_data="secondary:user:persona", style="primary")])
@@ -521,8 +521,8 @@ def _admin_panel_text() -> str:
         f"📈 <b>Usuarios con tokens usados en las últimas 10 h:</b> {active_users}\n"
         f"💬 <b>Tokens consumidos en las últimas 10 h:</b> {window_requests}\n"
         f"⚡ <b>Tokens usados en el último minuto:</b> {recent_requests}\n"
-        f"🎯 <b>Saldo:</b> {QUESTION_LIMIT} tokens iniciales; después {RENEWAL_QUESTION_LIMIT} por cada ventana móvil de 10 h\n\n"
-        "Los tokens extra por referidos se suman al saldo. El límite se cuenta por usuario, también en grupos."
+        f"🎯 <b>Cuota por usuario:</b> {QUESTION_LIMIT} tokens iniciales; después {RENEWAL_QUESTION_LIMIT} por cada ventana móvil de 10 h\n\n"
+        "Los tokens extra por referidos se suman a la cuota. El límite se cuenta por usuario, también en grupos."
     )
 
 
@@ -550,7 +550,7 @@ def _admin_stats_text() -> str:
         f"🟢 Usuarios que usaron tokens en las últimas 10 h: <b>{active_users}</b>\n"
         f"💬 Tokens consumidos en las últimas 10 h: <b>{window_requests}</b>\n"
         f"⚡ Tokens usados en el último minuto: <b>{recent_requests}</b>\n"
-        f"🎯 Saldo individual: <b>{QUESTION_LIMIT} tokens iniciales; luego {RENEWAL_QUESTION_LIMIT} cada 10 h</b>\n"
+        f"🎯 Cuota por usuario: <b>{QUESTION_LIMIT} tokens iniciales; luego {RENEWAL_QUESTION_LIMIT} cada 10 h</b>\n"
         f"🤖 Estado de IA: <b>{'activa' if _AI_ENABLED else 'pausada'}</b>"
     )
 
@@ -909,13 +909,13 @@ def _quota_text(user_id: int) -> str:
     phase = (
         f"Renovación: <b>{RENEWAL_QUESTION_LIMIT} tokens</b> cada 10 horas"
         if user_id in _RENEWAL_USERS
-        else f"Saldo inicial: <b>{QUESTION_LIMIT} tokens</b>; después, <b>{RENEWAL_QUESTION_LIMIT} tokens</b> cada 10 horas"
+        else f"Tokens iniciales: <b>{QUESTION_LIMIT}</b>; después, <b>{RENEWAL_QUESTION_LIMIT} tokens</b> cada 10 horas"
     )
     bonus = _referral_bonus(user_id)
     if bonus:
         phase += f" + {bonus} extra{'' if bonus == 1 else 's'} por referidos"
     text = (
-        "💳 <b>Saldo de tokens</b>\n\n"
+        "🎟️ <b>Tus tokens</b>\n\n"
         f"🎟️ Te quedan <b>{remaining}/{_question_limit(user_id)} tokens</b>.\n"
         f"↻ {phase}.\n<i>Un token permite enviar un mensaje a la IA.</i>"
     )
