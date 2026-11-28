@@ -943,20 +943,14 @@ def test_personality_instructions_are_applied_by_ai_backend(monkeypatch):
     assert captured["body"]["temperature"] == 0.8
 
 
-def test_secondary_bot_starts_after_restore_before_other_startup_work():
+def test_secondary_bot_starts_independently_of_primary_post_init():
     import bot as primary
 
     source = Path(primary.__file__).read_text(encoding="utf-8")
     post_init = source[source.index("async def post_init("):source.index("def main()")]
-    main = source[source.index("def main()"):]
-    restore_index = post_init.index("restore_backup_with_retries")
-    start_positions = [
-        index for index in range(len(post_init))
-        if post_init.startswith("_launch_secondary_ai_process(application)", index)
-    ]
-    backup_check_index = post_init.index("if backup_hold:", restore_index)
-    identity_index = post_init.index("identity = await application.bot.get_me()")
-    assert len(start_positions) == 2
-    assert start_positions[0] < restore_index < start_positions[1] < backup_check_index
-    assert start_positions[1] < identity_index
-    assert "start_secondary_ai_bot(" not in main
+    main = source[source.index("def main()") :]
+    assert "_launch_secondary_ai_process" not in post_init
+    launch_index = main.index("_launch_secondary_ai_process()")
+    polling_index = main.index("application.run_polling(")
+    assert launch_index < polling_index
+    assert "SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE" in source

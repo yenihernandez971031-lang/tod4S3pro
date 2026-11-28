@@ -419,6 +419,7 @@ AI_ACCOUNTS_FILE = os.getenv("AI_ACCOUNTS_FILE", str(DATA_DIR / "ai_app_accounts
 SECONDARY_AI_BOT_STATE_FILE = os.getenv(
     "SECONDARY_AI_BOT_STATE_FILE", str(DATA_DIR / "secondary_ai_bot_state.json")
 )
+_SECONDARY_AI_BOT_PROCESS = None
 ai_auth.configure_storage(AI_ACCOUNTS_FILE)
 # Telegram Bot API no mantiene una sesión local. La sesión MTProto opcional del proyecto
 # sí puede persistirse aquí para incluirla, cifrada, en la copia de seguridad.
@@ -8975,16 +8976,18 @@ async def restore_backup_with_retries(
     return (0, 0, False), True
 
 
-def _launch_secondary_ai_process(application: Application) -> None:
-    """Inicia el bot IA antes de otras tareas, tras proteger el estado compartido."""
+def _launch_secondary_ai_process() -> None:
+    """Inicia el bot IA independientemente del ciclo de inicio del bot principal."""
+    global _SECONDARY_AI_BOT_PROCESS
     try:
         from secondary_ai_bot import start_secondary_ai_bot
-        process = start_secondary_ai_bot(SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE)
-        application.bot_data["secondary_ai_bot_process"] = process
-        if process is None:
+        _SECONDARY_AI_BOT_PROCESS = start_secondary_ai_bot(
+            SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE
+        )
+        if _SECONDARY_AI_BOT_PROCESS is None:
             log.error("El proceso del bot IA no se inició; verifica TELEGRAM_AI_BOT_TOKEN.")
     except Exception:
-        log.exception("No se pudo iniciar el proceso del bot IA después de restaurar el backup")
+        log.exception("No se pudo iniciar el proceso independiente del bot IA")
 
 
 async def post_init(application: Application) -> None:
@@ -9031,7 +9034,6 @@ async def post_init(application: Application) -> None:
     log.info("Ruta de autenticación Telegram: %s", backup_layout.auth_dir)
     if not backup_chat_id:
         log.error("No hay destino de respaldo: configura TELEGRAM_BACKUP_CHAT_ID.")
-        _launch_secondary_ai_process(application)
     else:
         log.info("Destino de respaldo configurado: %s", backup_chat_id)
     log.info("Canal público de avisos configurado: %s", PUBLIC_CHANNEL_ID)
@@ -9046,8 +9048,6 @@ async def post_init(application: Application) -> None:
             backup_layout,
             logger=log,
         )
-        # La restauración terminó; habilitar /start antes de otras tareas.
-        _launch_secondary_ai_process(application)
         log.info(
             "Restauración inicial terminada: encontrada=%s archivos=%d bytes=%d",
             restore_found, restored_files, restored_bytes,
@@ -9729,6 +9729,9 @@ def main() -> None:
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN.strip()
     if not token:
         raise RuntimeError("Falta TELEGRAM_BOT_TOKEN en el entorno o archivo")
+    # El bot IA usa su propio token/proceso: arrancarlo aquí evita que dependa
+    # de que el post_init del bot principal complete todas sus tareas.
+    _launch_secondary_ai_process()
     temp_dir = os.getenv("TMPDIR", "/tmp").strip() or "/tmp"
     Path(temp_dir).mkdir(parents=True, exist_ok=True)
 

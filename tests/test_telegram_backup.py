@@ -552,15 +552,9 @@ class RestoreBeforeMtprotoTests(unittest.IsolatedAsyncioTestCase):
                 telegram_bot, "backup_to_telegram", side_effect=fake_backup
             ), patch.object(telegram_bot, "periodic_backup", side_effect=idle_backup), patch.object(
                 telegram_bot, "TelegramClient", side_effect=construct_client
-            ), patch.object(
-                telegram_bot,
-                "_launch_secondary_ai_process",
-                side_effect=lambda _app: events.append("launch_ai"),
             ):
                 await telegram_bot.post_init(app)
                 self.assertLess(events.index("restore"), events.index("construct_mtproto"))
-                self.assertLess(events.index("restore"), events.index("launch_ai"))
-                self.assertLess(events.index("launch_ai"), events.index("construct_mtproto"))
                 self.assertLess(events.index("restore"), events.index("start_mtproto"))
                 self.assertLess(events.index("start_mtproto"), len(events) - 1)
                 self.assertEqual(events[-1], "backup")
@@ -614,7 +608,7 @@ class RestoreBeforeMtprotoTests(unittest.IsolatedAsyncioTestCase):
                 telegram_bot, "backup_to_telegram", side_effect=fake_backup
             ), patch.object(telegram_bot, "periodic_backup", side_effect=idle_backup), patch.object(
                 telegram_bot, "TelegramClient", return_value=FakeClient()
-            ), patch.object(telegram_bot, "_launch_secondary_ai_process"):
+            ):
                 await telegram_bot.post_init(app)
                 self.assertTrue(app.bot_data["telegram_backup_hold"])
                 self.assertEqual(events, ["restore"])
