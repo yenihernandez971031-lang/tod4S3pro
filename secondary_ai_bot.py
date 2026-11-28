@@ -238,6 +238,32 @@ async def _keep_typing(bot, chat_id: int) -> None:
         await asyncio.sleep(4)
 
 
+async def _stream_answer_preview(message, chunks: asyncio.Queue) -> None:
+    """Muestra fragmentos de la respuesta conforme llegan, con ediciones agrupadas."""
+    parts: list[str] = []
+    while True:
+        chunk = await chunks.get()
+        if chunk is None:
+            return
+        parts.append(chunk)
+        await asyncio.sleep(0.8)
+        finished = False
+        while not chunks.empty():
+            extra = chunks.get_nowait()
+            if extra is None:
+                finished = True
+                break
+            parts.append(extra)
+        preview = "".join(parts)[:3700]
+        if preview:
+            try:
+                await message.edit_text("✍️\n" + preview, parse_mode=None)
+            except Exception as exc:
+                log.debug("No se pudo actualizar la respuesta parcial (%s)", type(exc).__name__)
+        if finished:
+            return
+
+
 def _rate_allowed(user_id: int) -> bool:
     now = time.time()
     with _RATE_LOCK:
@@ -898,11 +924,20 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     history[:] = history[-MAX_STORED_MESSAGES:]
     typing_task = asyncio.create_task(_keep_typing(context.bot, chat_id))
     progress_message = None
+    preview_queue: asyncio.Queue = asyncio.Queue()
+    preview_task = None
+    loop = asyncio.get_running_loop()
+
+    def enqueue_delta(chunk: str) -> None:
+        if chunk:
+            loop.call_soon_threadsafe(preview_queue.put_nowait, chunk)
+
     try:
         progress_message = await message.reply_text("🧠 La IA está trabajando en tu respuesta…")
+        preview_task = asyncio.create_task(_stream_answer_preview(progress_message, preview_queue))
         payload, status = await asyncio.to_thread(
             dispatch_telegram_ai_chat, user.id, _bounded_history(history), bypass_quota=is_admin,
-            question_limit=_question_limit(user.id),
+            question_limit=_question_limit(user.id), on_delta=enqueue_delta,
         )
         if status != 200 or not payload.get("ok"):
             error_code = str(payload.get("error", "ai_unavailable"))
@@ -911,6 +946,11 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             raise RuntimeError(f"{error_code}:{status}")
         answer = str(payload["reply"]).strip()
     except Exception as exc:
+        if preview_task is not None:
+            await asyncio.sleep(0)
+            preview_queue.put_nowait(None)
+            await preview_task
+            preview_task = None
         log.warning("Fallo en IA del segundo bot (%s)", type(exc).__name__)
         _record_error(exc)
         if not is_admin:
@@ -924,6 +964,10 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await message.reply_text(error_text)
         return
     finally:
+        if preview_task is not None:
+            await asyncio.sleep(0)
+            preview_queue.put_nowait(None)
+            await preview_task
         typing_task.cancel()
         try:
             await typing_task

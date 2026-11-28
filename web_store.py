@@ -93,7 +93,12 @@ def _notrack_web_session_cookie() -> str:
     return cookie
 
 
-def _notrack_web_chat(prompt: str, timeout_seconds: int = 45) -> str:
+def _notrack_web_chat(
+    prompt: str,
+    timeout_seconds: int = 45,
+    *,
+    on_delta: Callable[[str], None] | None = None,
+) -> str:
     """Usa el chat web anónimo de NoTrack como respaldo sin exponer una clave API."""
     with _NOTRACK_WEB_LOCK:
         cookie = _notrack_web_session_cookie()
@@ -126,7 +131,10 @@ def _notrack_web_chat(prompt: str, timeout_seconds: int = 45) -> str:
                     continue
                 event_type = event.get("type")
                 if event_type == "delta":
-                    chunks.append(str(event.get("chunk") or ""))
+                    chunk = str(event.get("chunk") or "")
+                    chunks.append(chunk)
+                    if chunk and on_delta is not None:
+                        on_delta(chunk)
                 elif event_type in {"message", "consensus"} and event.get("content"):
                     final = str(event["content"])
                 elif event_type == "error":
@@ -355,6 +363,7 @@ def dispatch_telegram_ai_chat(
     *,
     bypass_quota: bool = False,
     question_limit: int = 10,
+    on_delta: Callable[[str], None] | None = None,
 ) -> tuple[dict, int]:
     """Usa el proveedor de IA compartido; el bot secundario no recibe credenciales."""
     if not isinstance(user_id, int) or user_id <= 0:
@@ -421,14 +430,18 @@ def dispatch_telegram_ai_chat(
     valid_key = api_key.startswith("sk-notrack-") and len(api_key) >= 24 and not any(c.isspace() for c in api_key)
     if not valid_key:
         try:
-            answer = _notrack_web_chat("\n\n".join(f"{item['role'].upper()}: {item['content']}" for item in request_messages))
+            fallback_prompt = "\n\n".join(f"{item['role'].upper()}: {item['content']}" for item in request_messages)
+            if on_delta is None:
+                answer = _notrack_web_chat(fallback_prompt)
+            else:
+                answer = _notrack_web_chat(fallback_prompt, on_delta=on_delta)
             return {"ok": True, "reply": answer.strip()}, 200
         except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
             refund_reservation()
             return {"ok": False, "error": "ai_fallback_unavailable"}, 503
     request_body = json.dumps({
         "model": "notrack-uncensored", "messages": request_messages,
-        "max_tokens": 768 if code_request else 256, "temperature": 0.4, "stream": False,
+        "max_tokens": 512 if code_request else 192, "temperature": 0.4, "stream": on_delta is not None,
     }, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         "https://api.notrack.ai/v1/chat/completions", data=request_body,
@@ -440,8 +453,30 @@ def dispatch_telegram_ai_chat(
         return {"ok": False, "error": "ai_busy"}, 429
     try:
         with urllib.request.urlopen(request, timeout=35) as response:
-            provider_data = json.loads(response.read(1_000_000).decode("utf-8"))
-        answer = provider_data["choices"][0]["message"]["content"]
+            if on_delta is None:
+                provider_data = json.loads(response.read(1_000_000).decode("utf-8"))
+                answer = provider_data["choices"][0]["message"]["content"]
+            else:
+                pieces: list[str] = []
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", "replace").strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        event = json.loads(data)
+                    except (TypeError, ValueError):
+                        continue
+                    choices = event.get("choices") or []
+                    if not choices:
+                        continue
+                    delta = (choices[0].get("delta") or {}).get("content", "")
+                    if isinstance(delta, str) and delta:
+                        pieces.append(delta)
+                        on_delta(delta)
+                answer = "".join(pieces)
         if not isinstance(answer, str) or not answer.strip():
             raise ValueError("empty_answer")
         return {"ok": True, "reply": answer.strip()}, 200

@@ -174,11 +174,11 @@ def test_group_ai_response_shows_typing_and_visible_working_message(monkeypatch)
         chat_id = -100456
         secondary._JOIN_CONFIRMED.add(user_id)
         monkeypatch.setattr(secondary, "_rate_allowed", lambda _user_id: True)
-        monkeypatch.setattr(
-            secondary,
-            "dispatch_telegram_ai_chat",
-            lambda _user_id, _history, **_kwargs: ({"ok": True, "reply": "Respuesta de prueba"}, 200),
-        )
+        def fake_dispatch(_user_id, _history, **kwargs):
+            kwargs["on_delta"]("Primer fragmento")
+            return {"ok": True, "reply": "Respuesta de prueba"}, 200
+
+        monkeypatch.setattr(secondary, "dispatch_telegram_ai_chat", fake_dispatch)
         bot = FakeBot()
         update = FakeUpdate(user_id, chat_id=chat_id, chat_type="group", text="¿Qué tal?")
 
@@ -187,6 +187,7 @@ def test_group_ai_response_shows_typing_and_visible_working_message(monkeypatch)
         assert bot.actions == [(chat_id, secondary.ChatAction.TYPING)]
         progress = update.effective_message.sent[0]
         assert "está trabajando" in progress.text
+        assert any(text.startswith("✍️\nPrimer fragmento") for text, _ in progress.edits)
         assert progress.edits[-1][0].startswith("Respuesta de prueba")
         assert "Te quedan" in progress.edits[-1][0]
         assert any(
@@ -507,7 +508,7 @@ def test_telegram_ai_backend_uses_code_instructions_and_ten_hour_cap(monkeypatch
     assert limited["error"] == "ai_10_hour_limit"
     extra, status = web_store.dispatch_telegram_ai_chat(959, messages, question_limit=11)
     assert status == 200 and extra["ok"]
-    assert captured["body"]["max_tokens"] == 768
+    assert captured["body"]["max_tokens"] == 512
     assert "solución ejecutable" in captured["body"]["messages"][0]["content"]
     for _ in range(12):
         payload, status = web_store.dispatch_telegram_ai_chat(959, messages, bypass_quota=True)
@@ -517,6 +518,41 @@ def test_telegram_ai_backend_uses_code_instructions_and_ten_hour_cap(monkeypatch
     clock[0] += secondary.QUESTION_WINDOW_SECONDS + 1
     payload, status = web_store.dispatch_telegram_ai_chat(959, messages)
     assert status == 200 and payload["ok"]
+
+
+def test_telegram_ai_streams_response_fragments_as_they_arrive(monkeypatch):
+    monkeypatch.setenv("IASINCENSURA", "sk-notrack-test-key-for-telegram")
+    monkeypatch.setattr(web_store, "_AI_TELEGRAM_REQUESTS_BY_USER", {})
+    captured = {}
+    fragments = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def __iter__(self):
+            for text in ("Hola", " mundo"):
+                event = {"choices": [{"delta": {"content": text}}]}
+                yield ("data: " + json.dumps(event) + "\n\n").encode()
+            yield b"data: [DONE]\n\n"
+
+    def fake_urlopen(request, timeout):
+        captured["body"] = json.loads(request.data.decode())
+        return Response()
+
+    monkeypatch.setattr(web_store.urllib.request, "urlopen", fake_urlopen)
+    payload, status = web_store.dispatch_telegram_ai_chat(
+        959, [{"role": "user", "content": "Saluda"}], bypass_quota=True,
+        on_delta=fragments.append,
+    )
+    assert status == 200
+    assert payload == {"ok": True, "reply": "Hola mundo"}
+    assert fragments == ["Hola", " mundo"]
+    assert captured["body"]["stream"] is True
+    assert captured["body"]["max_tokens"] == 192
 
 
 def test_telegram_backend_refunds_quota_when_provider_fails(monkeypatch):

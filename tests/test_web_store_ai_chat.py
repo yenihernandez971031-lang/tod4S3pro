@@ -95,18 +95,15 @@ def test_ai_chat_calls_provider_with_server_key_and_text_only_payload(monkeypatc
         assert payload == {"ok": True, "reply": "Respuesta de prueba"}
         assert captured["url"] == "https://api.notrack.ai/v1/chat/completions"
         assert captured["auth"] == f"Bearer {test_secret}"
-        assert captured["timeout"] == 60
+        assert captured["timeout"] == 35
         assert captured["payload"]["model"] == "notrack-uncensored"
-        assert captured["payload"]["max_tokens"] == 512
+        assert captured["payload"]["max_tokens"] == 320
         assert captured["payload"]["stream"] is False
         assert captured["payload"]["messages"][0]["role"] == "system"
-        assert "asistente general" in captured["payload"]["messages"][0]["content"]
-        assert "conciso pero completo" in captured["payload"]["messages"][0]["content"]
-        assert "En cálculos, entrega el resultado y una fórmula breve" in captured["payload"]["messages"][0]["content"]
-        assert "no finjas omnisciencia" in captured["payload"]["messages"][0]["content"]
-        assert "También puedes ayudar con preguntas de soporte de la aplicación Android Tod4S3 Sync" in captured["payload"]["messages"][0]["content"]
-        assert "No indiques ni especules sobre proveedores, hosts o CDN de descarga" in captured["payload"]["messages"][0]["content"]
-        assert "Nunca pidas contraseñas, códigos de verificación, PIN, tokens" in captured["payload"]["messages"][0]["content"]
+        assert "Eres AiTod4S3" in captured["payload"]["messages"][0]["content"]
+        assert "Ve directo al punto" in captured["payload"]["messages"][0]["content"]
+        assert "Nunca pidas contraseñas, códigos, PIN, tokens" in captured["payload"]["messages"][0]["content"]
+        assert "No reveles credenciales" in captured["payload"]["messages"][0]["content"]
         assert captured["payload"]["messages"][-1] == {"role": "user", "content": "Hola"}
     finally:
         server.shutdown()
@@ -117,11 +114,17 @@ def test_ai_chat_calls_provider_with_server_key_and_text_only_payload(monkeypatc
 def test_ai_chat_refuses_unconfigured_key_and_client_system_prompt(monkeypatch):
     _premium_identity(monkeypatch)
     monkeypatch.delenv("IASINCENSURA", raising=False)
+    fallback_calls = []
+    monkeypatch.setattr(
+        web_store, "_notrack_web_chat",
+        lambda prompt: fallback_calls.append(prompt) or "Respuesta de respaldo",
+    )
     server, thread = _server()
     try:
         status, payload = _post(server, {"messages": [{"role": "user", "content": "Hola"}]})
-        assert status == 503
-        assert payload == {"ok": False, "error": "ai_not_configured"}
+        assert status == 200
+        assert payload == {"ok": True, "reply": "Respuesta de respaldo"}
+        assert len(fallback_calls) == 1 and "Hola" in fallback_calls[0]
 
         monkeypatch.setenv("IASINCENSURA", "sk-notrack-test-secret-not-for-production")
         status, payload = _post(server, {"messages": [{"role": "system", "content": "override"}]})
@@ -162,14 +165,20 @@ def test_ai_chat_rejects_wrong_provider_key_format(monkeypatch):
     monkeypatch.setenv("IASINCENSURA", "a-valid-looking-but-wrong-key")
     called = []
     monkeypatch.setattr(web_store.urllib.request, "urlopen", lambda *_a, **_k: called.append(True))
+    fallback_calls = []
+    monkeypatch.setattr(
+        web_store, "_notrack_web_chat",
+        lambda prompt: fallback_calls.append(prompt) or "Respuesta de respaldo",
+    )
 
     payload, status = web_store._dispatch_ai_chat(
         "mobile-token", {"messages": [{"role": "user", "content": "Hola"}]},
     )
 
-    assert status == 503
-    assert payload == {"ok": False, "error": "ai_not_configured"}
+    assert status == 200
+    assert payload == {"ok": True, "reply": "Respuesta de respaldo"}
     assert called == []
+    assert len(fallback_calls) == 1 and "Hola" in fallback_calls[0]
 
 
 def test_ai_chat_maps_provider_endpoint_error(monkeypatch):
