@@ -43,6 +43,7 @@ _RATE_LOCK = threading.RLock()
 _RECENT = defaultdict(list)
 _DAILY = defaultdict(list)
 _HISTORY: dict[int, list[dict[str, str]]] = defaultdict(list)
+_JOIN_CONFIRMED: set[int] = set()
 
 
 def _join_keyboard() -> InlineKeyboardMarkup:
@@ -62,35 +63,13 @@ def _join_text(missing: list[str] | None = None) -> str:
     return "Únete a los dos canales y luego pulsa «Ya me uní — verificar» para usar la IA."
 
 
-async def _membership_status(bot, user_id: int) -> tuple[bool, bool, list[str]]:
-    missing: list[str] = []
-    failed = False
-    for chat_id, label in ((CHANNEL_ONE, "Canal oficial"), (CHANNEL_TWO, "Canal secundario")):
-        try:
-            member = await asyncio.wait_for(bot.get_chat_member(chat_id=chat_id, user_id=user_id), timeout=8)
-            status = getattr(member, "status", "")
-            allowed = status in {"creator", "administrator", "member"}
-            if status == "restricted":
-                allowed = bool(getattr(member, "is_member", False))
-            if not allowed:
-                missing.append(label)
-        except Exception as exc:
-            failed = True
-            log.warning("No se pudo verificar %s (%s)", chat_id, type(exc).__name__)
-    return not missing and not failed, failed, missing
-
-
 async def _require_access(update: Update, bot=None) -> bool:
     user = update.effective_user
     message = update.effective_message
     if not user or not message or getattr(update.effective_chat, "type", None) != "private":
         return False
-    allowed, failed, missing = await _membership_status(bot or update.get_bot(), user.id)
-    if failed:
-        await message.reply_text("No pude verificar las suscripciones ahora. Asegúrate de que este bot sea administrador en ambos canales e inténtalo de nuevo.", reply_markup=_join_keyboard())
-        return False
-    if not allowed:
-        await message.reply_text(_join_text(missing), reply_markup=_join_keyboard())
+    if user.id not in _JOIN_CONFIRMED:
+        await message.reply_text(_join_text(), reply_markup=_join_keyboard())
         return False
     return True
 
@@ -123,14 +102,9 @@ async def _verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not query or not update.effective_user:
         return
     await query.answer()
-    allowed, failed, missing = await _membership_status(context.bot, update.effective_user.id)
-    if failed:
-        await query.edit_message_text("No pude verificar ahora. Comprueba que el segundo bot sea administrador en ambos canales.", reply_markup=_join_keyboard())
-    elif allowed:
-        _HISTORY.pop(update.effective_user.id, None)
-        await query.edit_message_text("✅ Suscripción confirmada. Ya puedes usar la IA enviando mensajes aquí.")
-    else:
-        await query.edit_message_text(_join_text(missing), reply_markup=_join_keyboard())
+    # Es una confirmación visual: no se consulta la membresía de Telegram.
+    _JOIN_CONFIRMED.add(update.effective_user.id)
+    await query.edit_message_text("✅ Listo. Ya puedes usar la IA enviando mensajes aquí.")
 
 
 async def _reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
