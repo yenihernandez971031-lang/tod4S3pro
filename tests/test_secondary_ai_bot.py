@@ -197,6 +197,31 @@ def test_admin_refresh_callback_denies_other_users():
     asyncio.run(run())
 
 
+def test_admin_statistics_button_opens_a_distinct_statistics_view():
+    async def run():
+        admin_id = next(iter(secondary.ADMIN_USER_IDS))
+        button = next(
+            button
+            for row in secondary._admin_keyboard().inline_keyboard
+            for button in row
+            if button.text == "📊 Estadísticas"
+        )
+        assert button.callback_data == "secondary:admin:stats"
+        query = FakeQuery(button.callback_data)
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=admin_id),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+        await secondary._admin_callback(update, SimpleNamespace(user_data={}, bot=FakeBroadcaster()))
+        assert "Estadísticas del bot" in query.edited[0][0]
+        assert "Usuarios registrados" in query.edited[0][0]
+        back = query.edited[0][1]["reply_markup"].inline_keyboard[0][0]
+        assert back.callback_data == "secondary:admin:refresh"
+
+    asyncio.run(run())
+
+
 def test_start_shows_admin_panel_entry_only_to_owner_in_private_chat():
     async def run():
         admin_id = next(iter(secondary.ADMIN_USER_IDS))
@@ -220,6 +245,23 @@ def test_secondary_bot_refuses_admin_token(monkeypatch):
     monkeypatch.setattr(secondary, "TOKEN", "same-token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "same-token")
     assert secondary.start_secondary_ai_bot() is None
+
+
+def test_secondary_child_uses_the_backup_state_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(secondary, "TOKEN", "secondary-test-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "primary-test-token")
+    state_file = tmp_path / "secondary_ai_bot_state.json"
+    captured = {}
+
+    def fake_popen(command, env):
+        captured["command"] = command
+        captured["env"] = env
+        return SimpleNamespace(pid=123)
+
+    monkeypatch.setattr(secondary.subprocess, "Popen", fake_popen)
+    process = secondary.start_secondary_ai_bot(state_file)
+    assert process.pid == 123
+    assert captured["env"]["SECONDARY_AI_BOT_STATE_FILE"] == str(state_file)
 
 
 def test_secondary_bot_does_not_read_ai_provider_key():

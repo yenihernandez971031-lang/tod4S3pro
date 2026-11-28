@@ -160,6 +160,37 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
         layout = telegram_bot.telegram_backup_layout()
         self.assertEqual(layout.state_files["user_plans.json"], Path(telegram_bot.PLAN_DATA_FILE))
         self.assertEqual(layout.state_files["sync_app.json"], Path(telegram_bot.SYNC_APP_STATE_FILE))
+        self.assertEqual(
+            layout.state_files["secondary_ai_bot_state.json"],
+            Path(telegram_bot.SECONDARY_AI_BOT_STATE_FILE),
+        )
+
+    async def test_backup_round_trip_includes_secondary_ai_users(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = make_layout(root / "source")
+            target = make_layout(root / "target")
+            state_key = "secondary_ai_bot_state.json"
+            source_state = root / "source" / state_key
+            target_state = root / "target" / state_key
+            user_state = {
+                "users": {"321": {"first_name": "Prueba", "private_chat_id": 321}},
+                "banned_users": [],
+                "questions": {"321": [1800000000.0]},
+                "ai_enabled": True,
+            }
+            source_state.write_text(json.dumps(user_state), encoding="utf-8")
+            source.state_files[state_key] = source_state
+            target.state_files[state_key] = target_state
+
+            encrypted, _, _, _ = build_encrypted_backup(source, TOKEN)
+            snapshot = decrypt_snapshot(encrypted, TOKEN)
+            restored, _ = restore_snapshot(snapshot, target)
+
+            self.assertGreaterEqual(restored, 1)
+            restored_state = json.loads(target_state.read_text(encoding="utf-8"))
+            self.assertEqual(restored_state["users"]["321"]["first_name"], "Prueba")
+            self.assertEqual(restored_state["questions"]["321"], [1800000000.0])
 
     async def test_backup_captures_premium_plans_and_activation_tokens_encrypted(self):
         with tempfile.TemporaryDirectory() as temp:

@@ -416,6 +416,9 @@ TODUS_AUTH_FILE = os.getenv("TODUS_AUTH_FILE", str(DATA_DIR / "todus_auth.json")
 TODUS_SENT_MESSAGES_FILE = os.getenv("TODUS_SENT_MESSAGES_FILE", str(DATA_DIR / "todus_sent_messages.json"))
 SYNC_APP_STATE_FILE = os.getenv("SYNC_APP_STATE_FILE", str(DATA_DIR / "sync_app.json"))
 AI_ACCOUNTS_FILE = os.getenv("AI_ACCOUNTS_FILE", str(DATA_DIR / "ai_app_accounts.json"))
+SECONDARY_AI_BOT_STATE_FILE = os.getenv(
+    "SECONDARY_AI_BOT_STATE_FILE", str(DATA_DIR / "secondary_ai_bot_state.json")
+)
 ai_auth.configure_storage(AI_ACCOUNTS_FILE)
 # Telegram Bot API no mantiene una sesión local. La sesión MTProto opcional del proyecto
 # sí puede persistirse aquí para incluirla, cifrada, en la copia de seguridad.
@@ -437,6 +440,7 @@ def telegram_backup_layout() -> BackupLayout:
             "todus_sent_messages.json": TODUS_SENT_MESSAGES_FILE,
             "sync_app.json": SYNC_APP_STATE_FILE,
             "ai_app_accounts.json": AI_ACCOUNTS_FILE,
+            "secondary_ai_bot_state.json": SECONDARY_AI_BOT_STATE_FILE,
         },
     )
 
@@ -9709,7 +9713,7 @@ def main() -> None:
         log.exception("No se pudo iniciar la tienda web de Railway")
     try:
         from secondary_ai_bot import start_secondary_ai_bot
-        start_secondary_ai_bot()
+        start_secondary_ai_bot(SECONDARY_AI_BOT_STATE_FILE)
     except Exception:
         # El bot administrador debe seguir funcionando aunque el bot de IA
         # secundario tenga una configuración incompleta o falle al arrancar.

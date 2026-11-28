@@ -216,7 +216,7 @@ def _admin_keyboard() -> InlineKeyboardMarkup:
         [
             [InlineKeyboardButton(toggle_text, callback_data="secondary:admin:toggle", style=toggle_style)],
             [
-                InlineKeyboardButton("📊 Estadísticas", callback_data="secondary:admin:refresh", style="primary"),
+                InlineKeyboardButton("📊 Estadísticas", callback_data="secondary:admin:stats", style="primary"),
                 InlineKeyboardButton("👥 Usuarios", callback_data="secondary:admin:users:0", style="primary"),
             ],
             [
@@ -262,6 +262,35 @@ def _admin_panel_text() -> str:
         f"⚡ <b>Preguntas en el último minuto:</b> {recent_requests}\n"
         f"🎯 <b>Cuota:</b> {QUESTION_LIMIT} preguntas cada 10 horas por usuario\n\n"
         "El límite se cuenta por usuario incluso si escribe en un grupo."
+    )
+
+
+def _admin_stats_text() -> str:
+    now = time.time()
+    window_start = now - QUESTION_WINDOW_SECONDS
+    minute_ago = now - 60
+    with _RATE_LOCK:
+        active_users = sum(
+            1 for values in _QUESTIONS.values()
+            if any(value > window_start for value in values)
+        )
+        window_requests = sum(
+            sum(value > window_start for value in values)
+            for values in _QUESTIONS.values()
+        )
+        recent_requests = sum(
+            sum(value > minute_ago for value in values)
+            for values in _RECENT.values()
+        )
+    return (
+        "📊 <b>Estadísticas del bot</b>\n\n"
+        f"👥 Usuarios registrados: <b>{len(_USERS)}</b>\n"
+        f"🚫 Usuarios bloqueados: <b>{len(_BANNED_USERS)}</b>\n"
+        f"🟢 Usuarios con preguntas en las últimas 10 h: <b>{active_users}</b>\n"
+        f"💬 Preguntas en las últimas 10 h: <b>{window_requests}</b>\n"
+        f"⚡ Preguntas en el último minuto: <b>{recent_requests}</b>\n"
+        f"🎯 Cuota individual: <b>{QUESTION_LIMIT} cada 10 horas</b>\n"
+        f"🤖 Estado de IA: <b>{'activa' if _AI_ENABLED else 'pausada'}</b>"
     )
 
 
@@ -364,6 +393,8 @@ async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.user_data.pop("admin_announcement_draft", None)
     if action in {"open", "refresh"}:
         text, keyboard = _admin_panel_text(), _admin_keyboard()
+    elif action == "stats":
+        text, keyboard = _admin_stats_text(), _admin_back_keyboard()
     elif action == "toggle":
         with _RATE_LOCK:
             _AI_ENABLED = not _AI_ENABLED
@@ -600,7 +631,7 @@ def run_secondary_ai_bot() -> None:
             time.sleep(10)
 
 
-def start_secondary_ai_bot() -> subprocess.Popen | None:
+def start_secondary_ai_bot(state_file: str | Path | None = None) -> subprocess.Popen | None:
     """Arranca el polling del bot 2 en un proceso separado del administrador."""
     if not TOKEN:
         log.info("Segundo bot de IA desactivado: falta TELEGRAM_AI_BOT_TOKEN")
@@ -610,7 +641,13 @@ def start_secondary_ai_bot() -> subprocess.Popen | None:
         log.error("Segundo bot desactivado: el token del bot 2 no puede reutilizar TELEGRAM_BOT_TOKEN")
         return None
 
-    process = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "--run-secondary-ai-bot"])
+    child_env = os.environ.copy()
+    if state_file is not None:
+        child_env["SECONDARY_AI_BOT_STATE_FILE"] = str(state_file)
+    process = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "--run-secondary-ai-bot"],
+        env=child_env,
+    )
     log.info("Proceso independiente del segundo bot de IA iniciado: pid=%s", process.pid)
     return process
 

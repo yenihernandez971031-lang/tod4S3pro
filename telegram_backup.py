@@ -41,6 +41,7 @@ STATE_KEYS = (
     "todus_sent_messages.json",
     "sync_app.json",
     "ai_app_accounts.json",
+    "secondary_ai_bot_state.json",
 )
 OLD_BACKUP_DIR_NAMES = {"backup", "backups", "old_backup", "old_backups", "archive", "archives"}
 
