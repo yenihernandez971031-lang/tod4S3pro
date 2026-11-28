@@ -1,25 +1,22 @@
 """Segundo bot de Telegram para usar AiTod4S3 con suscripción obligatoria.
 
 El token se configura únicamente mediante SECONDARY_TELEGRAM_BOT_TOKEN.
-Este bot es independiente del bot administrador, pero reutiliza la misma
-configuración IASINCENSURA y el mismo servicio de respaldo NoTrack.
+Este bot es independiente del bot administrador, pero delega la IA al backend
+compartido que ya utiliza la aplicación.
 """
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import os
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import defaultdict
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
 
-from web_store import _notrack_web_chat
+from web_store import dispatch_telegram_ai_chat
 
 log = logging.getLogger("secondary-ai-bot")
 
@@ -102,36 +99,6 @@ def _rate_allowed(user_id: int) -> bool:
         return True
 
 
-def _provider_chat(messages: list[dict[str, str]]) -> str:
-    system = (
-        "Eres AiTod4S3, un asistente general experto, claro y preciso. Responde en el idioma del usuario. "
-        "No solicites contraseñas, códigos, PIN, tokens ni datos de pago. Responde de forma directa y útil."
-    )
-    clean = [{"role": "system", "content": system}, *messages]
-    api_key = os.getenv("IASINCENSURA", "").strip()
-    if not api_key.startswith("sk-notrack-") or len(api_key) < 24 or any(char.isspace() for char in api_key):
-        answer = _notrack_web_chat("\n\n".join(f"{item['role'].upper()}: {item['content']}" for item in clean))
-        return answer.strip()
-    body = json.dumps({
-        "model": "notrack-uncensored", "messages": clean,
-        "max_tokens": 512, "temperature": 0.4, "stream": False,
-    }, separators=(",", ":")).encode("utf-8")
-    request = urllib.request.Request(
-        "https://api.notrack.ai/v1/chat/completions", data=body,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=45) as response:
-            payload = json.loads(response.read(1_000_000).decode("utf-8"))
-        answer = payload["choices"][0]["message"]["content"]
-        if not isinstance(answer, str) or not answer.strip():
-            raise ValueError("empty_ai_response")
-        return answer.strip()
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
-        return _notrack_web_chat("\n\n".join(f"{item['role'].upper()}: {item['content']}" for item in clean)).strip()
-
-
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or getattr(update.effective_chat, "type", None) != "private":
         return
@@ -179,7 +146,10 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     history.append({"role": "user", "content": prompt})
     history[:] = history[-MAX_HISTORY:]
     try:
-        answer = await asyncio.to_thread(_provider_chat, list(history))
+        payload, status = await asyncio.to_thread(dispatch_telegram_ai_chat, user.id, list(history))
+        if status != 200 or not payload.get("ok"):
+            raise RuntimeError(str(payload.get("error", "ai_unavailable")))
+        answer = str(payload["reply"]).strip()
     except Exception:
         log.exception("Fallo en IA del segundo bot")
         await message.reply_text("La IA no está disponible en este momento. Inténtalo de nuevo más tarde.")

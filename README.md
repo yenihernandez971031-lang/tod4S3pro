@@ -6,7 +6,7 @@ NikuTodusS3 es un bot de Telegram que recibe archivos o enlaces públicos, los s
 
 ## Segundo bot independiente de IA
 
-El repositorio puede iniciar un segundo bot de Telegram separado del administrador. Configura únicamente `SECONDARY_TELEGRAM_BOT_TOKEN` con otro token de @BotFather; nunca reutilices `TELEGRAM_BOT_TOKEN` ni publiques ninguno de los dos tokens. Este bot usa la misma clave privada `IASINCENSURA` del servicio y permite conversar con AiTod4S3, pero bloquea el chat hasta que el usuario pertenezca a `@Dark_Zone_666` y `@darzPrbo`.
+El repositorio puede iniciar un segundo bot de Telegram separado del administrador. Configura únicamente `SECONDARY_TELEGRAM_BOT_TOKEN` con otro token de @BotFather; nunca reutilices `TELEGRAM_BOT_TOKEN` ni publiques ninguno de los dos tokens. El bot 2 delega la conversación al mismo backend de IA que ya usa la aplicación, sin pedir otra configuración de IA, y bloquea el chat hasta que el usuario pertenezca a `@Dark_Zone_666` y `@darzPrbo`.
 
 Agrega el segundo bot como administrador en ambos canales (con permiso para consultar miembros). Si `SECONDARY_TELEGRAM_BOT_TOKEN` está vacío, solo se inicia el bot administrador. Los canales están fijados en el código y no requieren variables adicionales. El segundo bot ofrece `/start`, `/reset`, botones para unirse y el botón de verificación; sus límites usan `AI_APP_DAILY_LIMIT` y mantiene únicamente un historial corto en memoria.
 

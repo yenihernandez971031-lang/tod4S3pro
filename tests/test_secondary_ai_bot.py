@@ -1,5 +1,6 @@
 import asyncio
 from types import SimpleNamespace
+from pathlib import Path
 
 import secondary_ai_bot as secondary
 
@@ -85,3 +86,9 @@ def test_secondary_bot_refuses_admin_token(monkeypatch):
     monkeypatch.setattr(secondary, "TOKEN", "same-token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "same-token")
     assert secondary.start_secondary_ai_bot() is None
+
+
+def test_secondary_bot_does_not_read_ai_provider_key():
+    source = Path(secondary.__file__).read_text(encoding="utf-8")
+    assert "IASINCENSURA" not in source
+    assert "dispatch_telegram_ai_chat" in source

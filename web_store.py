@@ -348,6 +348,87 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
     return {"ok": True, "reply": answer.strip()}, 200
 
 
+def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> tuple[dict, int]:
+    """Usa el mismo proveedor/configuración de IA de la aplicación desde Telegram.
+
+    El bot secundario no recibe ni conoce credenciales del proveedor; solamente
+    entrega el identificador de Telegram y la conversación a este backend.
+    """
+    if not isinstance(user_id, int) or user_id <= 0:
+        return {"ok": False, "error": "invalid_user"}, 400
+    if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
+        return {"ok": False, "error": "invalid_messages"}, 400
+    clean: list[dict[str, str]] = []
+    total = 0
+    for item in messages:
+        if not isinstance(item, dict) or item.get("role") not in {"user", "assistant"}:
+            return {"ok": False, "error": "invalid_messages"}, 400
+        content = item.get("content")
+        if not isinstance(content, str) or not content.strip() or len(content) > 4000:
+            return {"ok": False, "error": "invalid_messages"}, 400
+        content = content.strip()
+        total += len(content)
+        if total > 16000:
+            return {"ok": False, "error": "conversation_too_long"}, 413
+        clean.append({"role": item["role"], "content": content})
+    if clean[-1]["role"] != "user":
+        return {"ok": False, "error": "invalid_messages"}, 400
+
+    now = time.monotonic()
+    with _AI_RATE_LOCK:
+        recent = [seen for seen in _AI_REQUESTS_BY_USER.get(user_id, []) if now - seen < 60]
+        daily = [seen for seen in _AI_DAILY_REQUESTS_BY_USER.get(user_id, []) if now - seen < 86_400]
+        try:
+            daily_limit = max(1, min(100_000, int(os.getenv("IASINCENSURA_USER_DAILY_LIMIT", "80"))))
+        except ValueError:
+            daily_limit = 80
+        if len(recent) >= 8:
+            return {"ok": False, "error": "ai_rate_limited"}, 429
+        if len(daily) >= daily_limit:
+            return {"ok": False, "error": "ai_daily_limit"}, 429
+        recent.append(now)
+        daily.append(now)
+        _AI_REQUESTS_BY_USER[user_id] = recent
+        _AI_DAILY_REQUESTS_BY_USER[user_id] = daily
+
+    system = (
+        "Eres AiTod4S3. Responde en el idioma del usuario, con claridad y precisión. "
+        "No inventes datos ni solicites contraseñas, códigos, PIN, tokens o datos de pago. "
+        "Responde de forma directa y útil."
+    )
+    request_messages = [{"role": "system", "content": system}, *clean]
+    api_key = os.getenv("IASINCENSURA", "").strip()
+    valid_key = api_key.startswith("sk-notrack-") and len(api_key) >= 24 and not any(c.isspace() for c in api_key)
+    if not valid_key:
+        try:
+            answer = _notrack_web_chat("\n\n".join(f"{item['role'].upper()}: {item['content']}" for item in request_messages))
+            return {"ok": True, "reply": answer.strip()}, 200
+        except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
+            return {"ok": False, "error": "ai_fallback_unavailable"}, 503
+    request_body = json.dumps({
+        "model": "notrack-uncensored", "messages": request_messages,
+        "max_tokens": 320, "temperature": 0.4, "stream": False,
+    }, separators=(",", ":")).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.notrack.ai/v1/chat/completions", data=request_body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    if not _AI_GATEWAY_SEMAPHORE.acquire(blocking=False):
+        return {"ok": False, "error": "ai_busy"}, 429
+    try:
+        with urllib.request.urlopen(request, timeout=35) as response:
+            provider_data = json.loads(response.read(1_000_000).decode("utf-8"))
+        answer = provider_data["choices"][0]["message"]["content"]
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("empty_answer")
+        return {"ok": True, "reply": answer.strip()}, 200
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+        return {"ok": False, "error": "ai_unavailable"}, 503
+    finally:
+        _AI_GATEWAY_SEMAPHORE.release()
+
+
 def _has_control_characters(value: str) -> bool:
     return any(ord(char) < 32 or 0x7F <= ord(char) <= 0x9F for char in value)
 
