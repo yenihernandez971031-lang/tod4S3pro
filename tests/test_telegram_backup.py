@@ -177,8 +177,11 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
                 "users": {"321": {
                     "first_name": "Prueba", "private_chat_id": 321,
                     "referrals": [654], "referrals_count": 1, "referral_bonus": 1,
+                    "response_style": "detailed", "admin_token_bonus": 4,
+                    "admin_token_bonus_expires_at": 1800003600.0,
                 }},
                 "banned_users": [],
+                "managed_admin_ids": [987654],
                 "questions": {"321": [1800000000.0]},
                 "history": {"321:321": [{"role": "user", "content": "Pregunta guardada"}]},
                 "ai_enabled": True,
@@ -197,6 +200,9 @@ class TelegramBackupFlowTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(restored_state["users"]["321"]["referrals_count"], 1)
             self.assertEqual(restored_state["users"]["321"]["referral_bonus"], 1)
             self.assertEqual(restored_state["users"]["321"]["referrals"], [654])
+            self.assertEqual(restored_state["users"]["321"]["response_style"], "detailed")
+            self.assertEqual(restored_state["users"]["321"]["admin_token_bonus"], 4)
+            self.assertEqual(restored_state["managed_admin_ids"], [987654])
             self.assertEqual(restored_state["questions"]["321"], [1800000000.0])
             self.assertEqual(
                 restored_state["history"]["321:321"][0]["content"],

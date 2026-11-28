@@ -66,6 +66,10 @@ AI_TEMPERATURES = {
     "balanced": ("⚖️ Equilibrada", 0.5),
     "creative": ("✨ Creativa", 0.8),
 }
+AI_RESPONSE_STYLES = {
+    "brief": ("⚡ Breve", "Responde de forma breve y directa, normalmente en 2 a 5 frases. Mantén los datos esenciales y no omitas pasos importantes si se solicitan instrucciones."),
+    "detailed": ("📚 Detallada", "Da una explicación amplia, ordenada y didáctica, con pasos y ejemplos útiles cuando corresponda."),
+}
 STATE_FILE = Path(os.getenv("SECONDARY_AI_BOT_STATE_FILE", "/data/secondary_ai_bot_state.json"))
 _RATE_LOCK = threading.RLock()
 _RECENT = defaultdict(list)
@@ -78,6 +82,7 @@ _ADMIN_IDS_LOCK = threading.Lock()
 _ADMIN_IDS_LAST_REFRESH = 0.0
 _USERS: dict[int, dict[str, Any]] = {}
 _BANNED_USERS: set[int] = set()
+_MANAGED_ADMIN_IDS: set[int] = set()
 _AI_ENABLED = True
 _RECENT_ERRORS: list[str] = []
 
@@ -106,6 +111,7 @@ def _save_state_locked() -> None:
         "banned_users": sorted(_BANNED_USERS),
         "join_confirmed": sorted(_JOIN_CONFIRMED),
         "membership_check_version": 1,
+        "managed_admin_ids": sorted(_MANAGED_ADMIN_IDS),
         "ai_enabled": _AI_ENABLED,
     }
     try:
@@ -146,6 +152,10 @@ def _load_state() -> None:
             _BANNED_USERS.update(int(value) for value in data.get("banned_users", []))
             if data.get("membership_check_version") == 1:
                 _JOIN_CONFIRMED.update(int(value) for value in data.get("join_confirmed", []))
+            _MANAGED_ADMIN_IDS.update(
+                int(value) for value in data.get("managed_admin_ids", [])
+                if str(value).isdigit() and int(value) > 0
+            )
             _AI_ENABLED = bool(data.get("ai_enabled", True))
     except FileNotFoundError:
         return
@@ -164,6 +174,8 @@ def _refresh_admin_user_ids() -> None:
         if now - _ADMIN_IDS_LAST_REFRESH < 30:
             return
         admin_ids = {5721542653}
+        with _RATE_LOCK:
+            admin_ids.update(_MANAGED_ADMIN_IDS)
         for env_name in ("OWNER_TELEGRAM_ID", "SECONDARY_AI_ADMIN_IDS"):
             for raw_id in os.getenv(env_name, "").replace(";", ",").split(","):
                 try:
@@ -189,6 +201,22 @@ def _refresh_admin_user_ids() -> None:
         ADMIN_USER_IDS.clear()
         ADMIN_USER_IDS.update(admin_ids)
         _ADMIN_IDS_LAST_REFRESH = now
+
+
+def _owner_user_ids() -> set[int]:
+    owners = {5721542653}
+    raw_owner = os.getenv("OWNER_TELEGRAM_ID", "").strip()
+    try:
+        owner_id = int(raw_owner)
+    except ValueError:
+        owner_id = 0
+    if owner_id > 0:
+        owners.add(owner_id)
+    return owners
+
+
+def _is_owner_admin(user_id: int) -> bool:
+    return user_id in _owner_user_ids()
 
 
 def _register_user(user, chat) -> None:
@@ -227,6 +255,7 @@ def _user_keyboard(referral_share_url: str | None = None) -> InlineKeyboardMarku
     ]]
     rows.append([InlineKeyboardButton("🧠 Personalidad", callback_data="secondary:user:persona", style="primary")])
     rows.append([InlineKeyboardButton("🌡️ Temperatura", callback_data="secondary:user:temperature", style="primary")])
+    rows.append([InlineKeyboardButton("📝 Estilo de respuesta", callback_data="secondary:user:response_style", style="primary")])
     if referral_share_url:
         rows.append([InlineKeyboardButton("🔗 Invitar", url=referral_share_url, style="primary")])
     rows.append([InlineKeyboardButton("📢 Canal oficial", url=CHANNEL_ONE_URL, style="primary")])
@@ -259,6 +288,19 @@ def _temperature_keyboard(current: str) -> InlineKeyboardMarkup:
             callback_data=f"secondary:user:temperature:set:{key}",
             style="success" if key == current else "primary",
         )])
+    rows.append([InlineKeyboardButton("⬅️ Volver al menú", callback_data="secondary:user:quota", style="primary")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _response_style_keyboard(current: str) -> InlineKeyboardMarkup:
+    rows = [[
+        InlineKeyboardButton(
+            ("✅ " if key == current else "") + label,
+            callback_data=f"secondary:user:response_style:set:{key}",
+            style="success" if key == current else "primary",
+        )]
+        for key, (label, _instruction) in AI_RESPONSE_STYLES.items()
+    ]
     rows.append([InlineKeyboardButton("⬅️ Volver al menú", callback_data="secondary:user:quota", style="primary")])
     return InlineKeyboardMarkup(rows)
 
@@ -332,6 +374,8 @@ def _rate_allowed(user_id: int) -> bool:
     with _RATE_LOCK:
         _RECENT[user_id] = [value for value in _RECENT[user_id] if now - value < 60]
         _QUESTIONS[user_id] = [value for value in _QUESTIONS[user_id] if now - value < QUESTION_WINDOW_SECONDS]
+        if _maybe_mark_renewal(user_id, _QUESTIONS[user_id]):
+            _save_state_locked()
         if len(_QUESTIONS[user_id]) >= _question_limit(user_id):
             return False
         _RECENT[user_id].append(now)
@@ -357,8 +401,7 @@ def _commit_question(user_id: int) -> None:
         values = [value for value in _QUESTIONS.get(user_id, [])
                   if now - value < QUESTION_WINDOW_SECONDS]
         _QUESTIONS[user_id] = values
-        if user_id not in _RENEWAL_USERS and len(values) >= _initial_question_limit(user_id):
-            _RENEWAL_USERS.add(user_id)
+        if _maybe_mark_renewal(user_id, values):
             _save_state_locked()
 
 
@@ -384,6 +427,8 @@ def _quota_status(user_id: int) -> tuple[int, float]:
     with _RATE_LOCK:
         values = [value for value in _QUESTIONS.get(user_id, []) if now - value < QUESTION_WINDOW_SECONDS]
         _QUESTIONS[user_id] = values
+        if _maybe_mark_renewal(user_id, values):
+            _save_state_locked()
         limit = _question_limit(user_id)
         if len(values) < limit:
             return limit - len(values), 0
@@ -397,13 +442,50 @@ def _referral_bonus(user_id: int) -> int:
         return 0
 
 
+def _active_admin_token_bonus(user_id: int) -> int:
+    info = _USERS.get(user_id, {})
+    try:
+        expires_at = float(info.get("admin_token_bonus_expires_at", 0))
+        amount = max(0, int(info.get("admin_token_bonus", 0)))
+    except (TypeError, ValueError):
+        return 0
+    return amount if expires_at > time.time() else 0
+
+
+def _adjust_admin_tokens(user_id: int, delta: int) -> tuple[int, int]:
+    """Adjust only the temporary admin-granted quota; referral and base quotas stay intact."""
+    now = time.time()
+    with _RATE_LOCK:
+        info = _USERS.setdefault(user_id, {})
+        current = _active_admin_token_bonus(user_id)
+        new_amount = max(0, min(1000, current + delta))
+        applied = new_amount - current
+        if new_amount:
+            info["admin_token_bonus"] = new_amount
+            info["admin_token_bonus_expires_at"] = now + QUESTION_WINDOW_SECONDS
+        else:
+            info.pop("admin_token_bonus", None)
+            info.pop("admin_token_bonus_expires_at", None)
+        _save_state_locked()
+        remaining, _ = _quota_status(user_id)
+        return applied, remaining
+
+
 def _initial_question_limit(user_id: int) -> int:
-    return QUESTION_LIMIT + _referral_bonus(user_id)
+    return min(1000, QUESTION_LIMIT + _referral_bonus(user_id) + _active_admin_token_bonus(user_id))
+
+
+def _maybe_mark_renewal(user_id: int, values: list[float]) -> bool:
+    """Advance to the lower renewal quota once the current initial allowance is spent."""
+    if user_id in _RENEWAL_USERS or len(values) < _initial_question_limit(user_id):
+        return False
+    _RENEWAL_USERS.add(user_id)
+    return True
 
 
 def _question_limit(user_id: int) -> int:
     base = RENEWAL_QUESTION_LIMIT if user_id in _RENEWAL_USERS else QUESTION_LIMIT
-    return base + _referral_bonus(user_id)
+    return min(1000, base + _referral_bonus(user_id) + _active_admin_token_bonus(user_id))
 
 
 def _complete_referral(user_id: int) -> bool:
@@ -481,6 +563,10 @@ def _admin_keyboard() -> InlineKeyboardMarkup:
                 InlineKeyboardButton("👥 Usuarios", callback_data="secondary:admin:users:0", style="primary"),
             ],
             [
+                InlineKeyboardButton("🔎 Buscar usuario", callback_data="secondary:admin:search", style="primary"),
+                InlineKeyboardButton("🛡️ Administradores", callback_data="secondary:admin:admins", style="primary"),
+            ],
+            [
                 InlineKeyboardButton("💌 Enviar aviso", callback_data="secondary:admin:announce", style="success"),
                 InlineKeyboardButton("⚠️ Errores", callback_data="secondary:admin:errors", style="danger"),
             ],
@@ -555,10 +641,21 @@ def _admin_stats_text() -> str:
     )
 
 
-def _admin_users_page(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
+def _admin_users_page(page: int = 0, filter_key: str = "all") -> tuple[str, InlineKeyboardMarkup]:
     page = max(0, page)
     per_page = 6
     users = sorted(_USERS.items(), key=lambda item: item[1].get("last_seen", 0), reverse=True)
+    if filter_key == "active":
+        cutoff = time.time() - 7 * 24 * 60 * 60
+        users = [item for item in users if float(item[1].get("last_seen", 0) or 0) >= cutoff]
+    elif filter_key == "blocked":
+        users = [item for item in users if item[0] in _BANNED_USERS]
+    elif filter_key == "admins":
+        users = [item for item in users if item[0] in ADMIN_USER_IDS]
+    elif filter_key == "low_tokens":
+        users = [item for item in users if _quota_status(item[0])[0] <= 2]
+    else:
+        filter_key = "all"
     total_pages = max(1, (len(users) + per_page - 1) // per_page)
     page = min(page, total_pages - 1)
     rows = []
@@ -574,13 +671,60 @@ def _admin_users_page(page: int = 0) -> tuple[str, InlineKeyboardMarkup]:
         ])
     nav = []
     if page > 0:
-        nav.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"secondary:admin:users:{page - 1}", style="primary"))
+        nav.append(InlineKeyboardButton("⬅️ Anterior", callback_data=f"secondary:admin:users_filter:{filter_key}:{page - 1}", style="primary"))
     if page + 1 < total_pages:
-        nav.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"secondary:admin:users:{page + 1}", style="primary"))
+        nav.append(InlineKeyboardButton("Siguiente ➡️", callback_data=f"secondary:admin:users_filter:{filter_key}:{page + 1}", style="primary"))
     if nav:
         rows.append(nav)
+    rows.append([
+        InlineKeyboardButton("Todos", callback_data="secondary:admin:users_filter:all:0", style="primary"),
+        InlineKeyboardButton("Activos 7 d", callback_data="secondary:admin:users_filter:active:0", style="success"),
+        InlineKeyboardButton("Bloqueados", callback_data="secondary:admin:users_filter:blocked:0", style="danger"),
+    ])
+    rows.append([
+        InlineKeyboardButton("Admins", callback_data="secondary:admin:users_filter:admins:0", style="primary"),
+        InlineKeyboardButton("≤2 tokens", callback_data="secondary:admin:users_filter:low_tokens:0", style="primary"),
+    ])
+    rows.append([InlineKeyboardButton("🔎 Buscar", callback_data="secondary:admin:search", style="primary")])
     rows.append([InlineKeyboardButton("⬅️ Menú admin", callback_data="secondary:admin:refresh", style="primary")])
-    return f"👥 <b>Usuarios</b> · página {page + 1}/{total_pages}\nTotal: {len(users)}\nSelecciona uno para administrarlo:", InlineKeyboardMarkup(rows)
+    labels = {"all": "todos", "active": "activos · 7 días", "blocked": "bloqueados", "admins": "administradores", "low_tokens": "con 2 tokens o menos"}
+    return f"👥 <b>Usuarios</b> · filtro: {labels[filter_key]} · página {page + 1}/{total_pages}\nTotal: {len(users)}\nSelecciona uno para administrarlo:", InlineKeyboardMarkup(rows)
+
+
+def _admin_user_search(query: str) -> tuple[str, InlineKeyboardMarkup]:
+    needle = query.strip().lstrip("@").casefold()
+    matches = []
+    for user_id, info in _USERS.items():
+        haystack = " ".join((str(user_id), str(info.get("username", "")), str(info.get("first_name", "")))).casefold()
+        if needle and needle in haystack:
+            matches.append((user_id, info))
+    matches.sort(key=lambda item: item[1].get("last_seen", 0), reverse=True)
+    rows = [[InlineKeyboardButton(
+        f"{str(info.get('first_name') or info.get('username') or 'Usuario')[:22]} · {user_id}",
+        callback_data=f"secondary:admin:user:{user_id}", style="primary",
+    )] for user_id, info in matches[:10]]
+    rows.append([InlineKeyboardButton("🔎 Buscar otra vez", callback_data="secondary:admin:search", style="primary")])
+    rows.append([InlineKeyboardButton("⬅️ Usuarios", callback_data="secondary:admin:users:0", style="primary")])
+    text = f"🔎 <b>Resultados para:</b> {escape(query[:80], quote=False)}\nCoincidencias: {len(matches)}"
+    if not matches:
+        text += "\nNo encontré usuarios con ese nombre o ID."
+    elif len(matches) > 10:
+        text += "\nMostrando los primeros 10 resultados."
+    return text, InlineKeyboardMarkup(rows)
+
+
+def _admin_admins_view() -> tuple[str, InlineKeyboardMarkup]:
+    lines = ["🛡️ <b>Administradores del bot IA</b>", ""]
+    for admin_id in sorted(ADMIN_USER_IDS):
+        info = _USERS.get(admin_id, {})
+        label = info.get("username") or info.get("first_name") or "Administrador"
+        lines.append(f"• {escape(str(label), quote=False)} · <code>{admin_id}</code>")
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➕ Añadir admin", callback_data="secondary:admin:admins:add", style="success")],
+        [InlineKeyboardButton("➖ Quitar admin", callback_data="secondary:admin:admins:remove", style="danger")],
+        [InlineKeyboardButton("⬅️ Menú admin", callback_data="secondary:admin:refresh", style="primary")],
+    ])
+    return "\n".join(lines), keyboard
 
 
 def _admin_user_detail(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
@@ -589,10 +733,12 @@ def _admin_user_detail(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     username = escape(str(info.get("username") or "sin usuario"), quote=False)
     remaining, wait_seconds = _quota_status(user_id)
     minutes = int(wait_seconds // 60)
+    admin_bonus = _active_admin_token_bonus(user_id)
     text = (
         f"👤 <b>{name}</b> (@{username})\n"
         f"🆔 <code>{user_id}</code>\n"
         f"📊 Tokens disponibles: {remaining}/{_question_limit(user_id)}\n"
+        + (f"🎁 Tokens extra del administrador: {admin_bonus} (ventana de 10 h)\n" if admin_bonus else "")
         + (f"⏳ Próximo token en aproximadamente {minutes} min\n" if remaining == 0 else "")
         + f"🚦 Estado: {'bloqueado' if user_id in _BANNED_USERS else 'activo'}"
     )
@@ -603,6 +749,7 @@ def _admin_user_detail(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     keyboard = InlineKeyboardMarkup(
         [
             [action],
+            [InlineKeyboardButton("🎟️ Ajustar tokens", callback_data=f"secondary:admin:tokens:{user_id}", style="primary")],
             [InlineKeyboardButton("💬 Ver historial", callback_data=f"secondary:admin:history:{user_id}", style="primary")],
             [InlineKeyboardButton("🧹 Reiniciar conversación", callback_data=f"secondary:admin:reset:{user_id}", style="primary")],
             [InlineKeyboardButton("⬅️ Lista de usuarios", callback_data="secondary:admin:users:0", style="primary")],
@@ -680,7 +827,7 @@ async def _admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     _refresh_admin_user_ids()
-    global _AI_ENABLED
+    global _AI_ENABLED, _ADMIN_IDS_LAST_REFRESH
     query = update.callback_query
     user = update.effective_user
     chat = update.effective_chat
@@ -697,6 +844,78 @@ async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         context.user_data.pop("admin_announcement_draft", None)
     if action in {"open", "refresh"}:
         text, keyboard = _admin_panel_text(), _admin_keyboard()
+    elif action == "search":
+        context.user_data["admin_awaiting_user_search"] = True
+        text, keyboard = "🔎 <b>Buscar usuario</b>\n\nEscribe su ID, nombre o @usuario.", _admin_back_keyboard()
+    elif action.startswith("users_filter:"):
+        parts = action.split(":")
+        try:
+            filter_key, page = parts[1], int(parts[2])
+        except (IndexError, ValueError):
+            filter_key, page = "all", 0
+        text, keyboard = _admin_users_page(page, filter_key)
+    elif action == "admins":
+        if not _is_owner_admin(user.id):
+            text, keyboard = "⛔ Solo el propietario puede cambiar administradores.", _admin_back_keyboard()
+        else:
+            text, keyboard = _admin_admins_view()
+    elif action in {"admins:add", "admins:remove"}:
+        if not _is_owner_admin(user.id):
+            text, keyboard = "⛔ Solo el propietario puede cambiar administradores.", _admin_back_keyboard()
+        else:
+            operation = action.split(":", 1)[1]
+            context.user_data["admin_awaiting_admin_change"] = operation
+            verb = "añadir" if operation == "add" else "quitar"
+            text, keyboard = f"🛡️ <b>{verb.capitalize()} administrador</b>\n\nEscribe el ID numérico de Telegram. No se puede quitar al propietario ni a administradores heredados del bot principal.", _admin_back_keyboard()
+    elif action == "admins:confirm":
+        draft = context.user_data.pop("admin_change_draft", {})
+        if not _is_owner_admin(user.id):
+            text, keyboard = "⛔ Solo el propietario puede cambiar administradores.", _admin_back_keyboard()
+        elif not isinstance(draft, dict) or draft.get("operation") not in {"add", "remove"}:
+            text, keyboard = "No hay ningún cambio pendiente.", _admin_admins_view()[1]
+        else:
+            target_id = int(draft.get("user_id", 0))
+            if draft["operation"] == "add":
+                _MANAGED_ADMIN_IDS.add(target_id)
+                outcome = f"✅ El usuario <code>{target_id}</code> ahora es administrador del bot IA."
+            elif target_id in _MANAGED_ADMIN_IDS:
+                _MANAGED_ADMIN_IDS.discard(target_id)
+                outcome = f"✅ Se quitó como administrador del bot IA a <code>{target_id}</code>."
+            else:
+                outcome = "No se puede quitar ese administrador: no fue añadido desde este panel."
+            with _RATE_LOCK:
+                _save_state_locked()
+            _ADMIN_IDS_LAST_REFRESH = 0
+            _refresh_admin_user_ids()
+            text, keyboard = outcome, _admin_admins_view()[1]
+    elif action == "admins:cancel":
+        context.user_data.pop("admin_change_draft", None)
+        context.user_data.pop("admin_awaiting_admin_change", None)
+        text, keyboard = "Cambio cancelado.", _admin_admins_view()[1] if _is_owner_admin(user.id) else _admin_back_keyboard()
+    elif action.startswith("tokens:") and action not in {"tokens:confirm", "tokens:cancel"}:
+        try:
+            target_id = int(action.split(":", 1)[1])
+        except ValueError:
+            target_id = 0
+        if target_id <= 0:
+            text, keyboard = "ID de usuario no válido.", _admin_back_keyboard()
+        else:
+            context.user_data["admin_awaiting_token_adjustment"] = target_id
+            text, keyboard = f"🎟️ <b>Ajustar tokens</b> · <code>{target_id}</code>\n\nEscribe un número positivo para añadir tokens o negativo para quitar tokens extra del administrador (por ejemplo: <code>+5</code> o <code>-2</code>). El cambio durará hasta 10 horas y requiere confirmación.", _admin_back_keyboard()
+    elif action == "tokens:confirm":
+        draft = context.user_data.pop("admin_token_adjustment_draft", {})
+        if not isinstance(draft, dict) or not draft:
+            text, keyboard = "No hay ningún ajuste pendiente.", _admin_back_keyboard()
+        else:
+            target_id = int(draft.get("user_id", 0))
+            delta = int(draft.get("delta", 0))
+            applied, remaining = _adjust_admin_tokens(target_id, delta)
+            text = f"✅ Ajuste aplicado a <code>{target_id}</code>: {applied:+d} tokens. Disponibles ahora: <b>{remaining}</b>."
+            keyboard = _admin_user_detail(target_id)[1]
+    elif action == "tokens:cancel":
+        context.user_data.pop("admin_token_adjustment_draft", None)
+        context.user_data.pop("admin_awaiting_token_adjustment", None)
+        text, keyboard = "Ajuste cancelado.", _admin_back_keyboard()
     elif action == "stats":
         text, keyboard = _admin_stats_text(), _admin_back_keyboard()
     elif action == "toggle":
@@ -785,16 +1004,77 @@ async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _refresh_admin_user_ids()
     user = update.effective_user
     message = update.effective_message
     chat = update.effective_chat
-    if (
-        not user or user.id not in ADMIN_USER_IDS or not message or not chat
-        or chat.type != "private" or not context.user_data.get("admin_awaiting_announcement")
-    ):
+    if not user or user.id not in ADMIN_USER_IDS or not message or not chat or chat.type != "private":
         await _chat(update, context)
         return
     draft = str(message.text or "").strip()
+    if context.user_data.pop("admin_awaiting_user_search", False):
+        text, keyboard = _admin_user_search(draft)
+        await message.reply_text(text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
+        return
+    admin_operation = context.user_data.pop("admin_awaiting_admin_change", None)
+    if admin_operation:
+        if not _is_owner_admin(user.id):
+            await message.reply_text("⛔ Solo el propietario puede cambiar administradores.")
+            return
+        if not draft.isdigit() or not 0 < int(draft) < 10**20:
+            await message.reply_text("ID no válido. Envía solo el ID numérico de Telegram.")
+            context.user_data["admin_awaiting_admin_change"] = admin_operation
+            return
+        target_id = int(draft)
+        if admin_operation == "add" and target_id in ADMIN_USER_IDS:
+            await message.reply_text("Ese usuario ya tiene permisos de administrador.", reply_markup=_admin_admins_view()[1])
+            return
+        if admin_operation == "remove" and (target_id not in _MANAGED_ADMIN_IDS or target_id in _owner_user_ids()):
+            await message.reply_text("Solo puedes quitar administradores añadidos desde este panel; los del propietario o del bot principal no se pueden quitar aquí.", reply_markup=_admin_admins_view()[1])
+            return
+        context.user_data["admin_change_draft"] = {"operation": admin_operation, "user_id": target_id}
+        verb = "añadir" if admin_operation == "add" else "quitar"
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Confirmar", callback_data="secondary:admin:admins:confirm", style="success"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="secondary:admin:admins:cancel", style="danger"),
+        ]])
+        await message.reply_text(
+            f"🛡️ <b>Confirmar cambio de permisos</b>\n\n¿Quieres {verb} como administrador del bot IA al usuario <code>{target_id}</code>?",
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    token_target = context.user_data.pop("admin_awaiting_token_adjustment", None)
+    if token_target is not None:
+        if not re.fullmatch(r"[+-]?\d{1,3}", draft) or int(draft) == 0:
+            await message.reply_text("Envía un número entre +1 y +100 o entre -1 y -100.")
+            context.user_data["admin_awaiting_token_adjustment"] = token_target
+            return
+        delta = int(draft)
+        if abs(delta) > 100:
+            await message.reply_text("El ajuste máximo por operación es de 100 tokens.")
+            context.user_data["admin_awaiting_token_adjustment"] = token_target
+            return
+        available_bonus = _active_admin_token_bonus(token_target)
+        if delta < 0 and available_bonus < abs(delta):
+            delta = -available_bonus
+        if delta == 0:
+            await message.reply_text("Ese usuario no tiene tokens extra concedidos por administrador para quitar.")
+            return
+        context.user_data["admin_token_adjustment_draft"] = {"user_id": token_target, "delta": delta}
+        markup = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Confirmar", callback_data="secondary:admin:tokens:confirm", style="success"),
+            InlineKeyboardButton("❌ Cancelar", callback_data="secondary:admin:tokens:cancel", style="danger"),
+        ]])
+        await message.reply_text(
+            f"🎟️ <b>Confirmar ajuste</b>\n\nUsuario: <code>{token_target}</code>\nCambio: <b>{delta:+d} tokens</b>\nVigencia: hasta 10 horas.",
+            reply_markup=markup,
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    if not context.user_data.get("admin_awaiting_announcement"):
+        await _chat(update, context)
+        return
     context.user_data["admin_awaiting_announcement"] = False
     if not draft:
         await message.reply_text("El aviso está vacío. Pulsa Enviar aviso para volver a intentarlo.")
@@ -982,8 +1262,12 @@ async def _user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     action = str(query.data or "").removeprefix("secondary:user:")
     persona_key = action.removeprefix("persona:set:") if action.startswith("persona:set:") else None
     temperature_key = action.removeprefix("temperature:set:") if action.startswith("temperature:set:") else None
+    response_style_key = action.removeprefix("response_style:set:") if action.startswith("response_style:set:") else None
     if (action not in {"quota", "referrals", "persona", "temperature"}
-            and persona_key not in AI_PERSONAS and temperature_key not in AI_TEMPERATURES):
+            and action != "response_style"
+            and persona_key not in AI_PERSONAS
+            and temperature_key not in AI_TEMPERATURES
+            and response_style_key not in AI_RESPONSE_STYLES):
         await query.answer("Opción no válida.", show_alert=True)
         return
     await query.answer()
@@ -995,6 +1279,24 @@ async def _user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         label, value = AI_TEMPERATURES[temperature_key]
         text = f"🌡️ Temperatura actualizada: <b>{escape(label)} · {value:.1f}</b>. Se aplicará a tus próximas preguntas."
         keyboard = _temperature_keyboard(temperature_key)
+    elif response_style_key:
+        with _RATE_LOCK:
+            info = _USERS.setdefault(user.id, {})
+            info["response_style"] = response_style_key
+            _save_state_locked()
+        label = AI_RESPONSE_STYLES[response_style_key][0]
+        text = f"✅ Estilo actualizado: <b>{escape(label)}</b>. Se aplicará a tus próximos mensajes."
+        keyboard = _response_style_keyboard(response_style_key)
+    elif action == "response_style":
+        current = str(_USERS.get(user.id, {}).get("response_style", "brief"))
+        if current not in AI_RESPONSE_STYLES:
+            current = "brief"
+        text = (
+            "📝 <b>Longitud de las respuestas</b>\n\n"
+            f"Estilo actual: <b>{escape(AI_RESPONSE_STYLES[current][0])}</b>\n"
+            "Elige si prefieres respuestas breves o explicaciones detalladas."
+        )
+        keyboard = _response_style_keyboard(current)
     elif action == "temperature":
         current = str(_USERS.get(user.id, {}).get("temperature", "balanced"))
         if current not in AI_TEMPERATURES:
@@ -1118,6 +1420,7 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             question_limit=_question_limit(user.id),
             persona=str(_USERS.get(user.id, {}).get("persona", "normal")),
             temperature_profile=str(_USERS.get(user.id, {}).get("temperature", "balanced")),
+            response_style=str(_USERS.get(user.id, {}).get("response_style", "brief")),
             on_delta=enqueue_delta,
         )
         if status != 200 or not payload.get("ok"):

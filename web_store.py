@@ -377,6 +377,7 @@ def dispatch_telegram_ai_chat(
     question_limit: int = 10,
     persona: str = "normal",
     temperature_profile: str = "balanced",
+    response_style: str = "brief",
     on_delta: Callable[[str], None] | None = None,
 ) -> tuple[dict, int]:
     """Usa el proveedor de IA compartido; el bot secundario no recibe credenciales."""
@@ -384,7 +385,7 @@ def dispatch_telegram_ai_chat(
         return {"ok": False, "error": "invalid_user"}, 400
     if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
         return {"ok": False, "error": "invalid_messages"}, 400
-    if isinstance(question_limit, bool) or not isinstance(question_limit, int) or not 1 <= question_limit <= 20:
+    if isinstance(question_limit, bool) or not isinstance(question_limit, int) or not 1 <= question_limit <= 1000:
         return {"ok": False, "error": "invalid_question_limit"}, 400
     clean: list[dict[str, str]] = []
     total = 0
@@ -431,6 +432,10 @@ def dispatch_telegram_ai_chat(
     temperature, temperature_instruction = _TELEGRAM_AI_TEMPERATURES.get(
         temperature_profile, _TELEGRAM_AI_TEMPERATURES["balanced"]
     ) if isinstance(temperature_profile, str) else _TELEGRAM_AI_TEMPERATURES["balanced"]
+    response_style_instruction = {
+        "brief": "Responde de forma breve y directa, normalmente en 2 a 5 frases, sin omitir los datos esenciales.",
+        "detailed": "Da una explicación amplia, ordenada y didáctica, con pasos y ejemplos útiles cuando corresponda.",
+    }.get(response_style, "Responde de forma breve y directa, normalmente en 2 a 5 frases, sin omitir los datos esenciales.")
     system = (
         "Eres AiTod4S3. Responde en el idioma del usuario, con claridad y precisión. "
         "Si preguntan quién creó, desarrolló o administra AiTod4S3, responde que el creador y administrador es @Niku_Blade "
@@ -438,11 +443,12 @@ def dispatch_telegram_ai_chat(
         "No menciones espontáneamente proveedores, API o modelos internos; si preguntan por detalles técnicos internos, "
         "explica brevemente que no se comparten en el chat. "
         "No inventes datos ni solicites contraseñas, códigos, PIN, tokens o datos de pago. "
-        "Responde directamente y de forma concisa. Si piden programación, incluye una solución ejecutable "
+        "Responde directamente y respeta el estilo de longitud elegido. Si piden programación, incluye una solución ejecutable "
         "en un bloque Markdown con lenguaje, imports y uso cuando hagan falta; no omitas partes con puntos suspensivos. "
         "Si piden información actual o fuentes, no inventes referencias. "
         + (f"Personalidad seleccionada: {persona_instruction} " if persona_instruction else "")
         + f"Temperatura elegida: {temperature_instruction} "
+        + f"Estilo de respuesta seleccionado: {response_style_instruction} "
     )
     request_messages = [{"role": "system", "content": system}, *clean]
     latest_prompt = clean[-1]["content"].lower()

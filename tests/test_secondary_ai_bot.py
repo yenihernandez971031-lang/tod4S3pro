@@ -621,6 +621,8 @@ def test_admin_bypasses_both_local_and_backend_question_quotas(monkeypatch, tmp_
         monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "bot_state.json")
         secondary._JOIN_CONFIRMED.add(admin_id)
         old_questions = list(secondary._QUESTIONS.get(admin_id, []))
+        old_style = secondary._USERS.get(admin_id, {}).get("response_style")
+        secondary._USERS.setdefault(admin_id, {})["response_style"] = "detailed"
         secondary._QUESTIONS[admin_id] = [secondary.time.time()] * secondary.QUESTION_LIMIT
         monkeypatch.setattr(
             secondary,
@@ -638,9 +640,14 @@ def test_admin_bypasses_both_local_and_backend_question_quotas(monkeypatch, tmp_
         await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
 
         assert observed["bypass_quota"] is True
+        assert observed["response_style"] == "detailed"
         assert len(secondary._QUESTIONS[admin_id]) == secondary.QUESTION_LIMIT
         assert update.effective_message.sent[0].edits[-1][0] == "Admin responde"
         secondary._QUESTIONS[admin_id] = old_questions
+        if old_style is None:
+            secondary._USERS[admin_id].pop("response_style", None)
+        else:
+            secondary._USERS[admin_id]["response_style"] = old_style
 
     asyncio.run(run())
 
@@ -772,6 +779,188 @@ def test_user_buttons_open_remaining_quota_and_referral_share_link():
                     for row in options["reply_markup"].inline_keyboard
                     for button in row
                 )
+
+    asyncio.run(run())
+
+
+def test_user_can_choose_brief_or_detailed_responses(monkeypatch, tmp_path):
+    async def run():
+        user_id = 987_015
+        monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "state.json")
+        secondary._JOIN_CONFIRMED.add(user_id)
+        query = FakeQuery("secondary:user:response_style")
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=user_id),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+        await secondary._user_callback(update, SimpleNamespace(bot=FakeBot()))
+        assert "Longitud de las respuestas" in query.edited[0][0]
+        detailed = next(
+            button
+            for row in query.edited[0][1]["reply_markup"].inline_keyboard
+            for button in row
+            if button.callback_data == "secondary:user:response_style:set:detailed"
+        )
+        assert detailed.text == "📚 Detallada"
+        query = FakeQuery("secondary:user:response_style:set:detailed")
+        update.callback_query = query
+        await secondary._user_callback(update, SimpleNamespace(bot=FakeBot()))
+        assert secondary._USERS[user_id]["response_style"] == "detailed"
+        assert "Estilo actualizado" in query.edited[0][0]
+        secondary._JOIN_CONFIRMED.discard(user_id)
+        secondary._USERS.pop(user_id, None)
+
+    asyncio.run(run())
+
+
+def test_admin_token_adjustments_are_temporary_and_persisted(monkeypatch, tmp_path):
+    user_id = 987_016
+    state_file = tmp_path / "state.json"
+    monkeypatch.setattr(secondary, "STATE_FILE", state_file)
+    old_user = secondary._USERS.get(user_id)
+    old_questions = secondary._QUESTIONS.get(user_id)
+    secondary._QUESTIONS[user_id] = []
+    secondary._USERS[user_id] = {}
+    try:
+        applied, remaining = secondary._adjust_admin_tokens(user_id, 4)
+        assert (applied, remaining) == (4, secondary.QUESTION_LIMIT + 4)
+        saved = json.loads(state_file.read_text(encoding="utf-8"))
+        assert saved["users"][str(user_id)]["admin_token_bonus"] == 4
+        applied, remaining = secondary._adjust_admin_tokens(user_id, -2)
+        assert (applied, remaining) == (-2, secondary.QUESTION_LIMIT + 2)
+    finally:
+        if old_user is None:
+            secondary._USERS.pop(user_id, None)
+        else:
+            secondary._USERS[user_id] = old_user
+        if old_questions is None:
+            secondary._QUESTIONS.pop(user_id, None)
+        else:
+            secondary._QUESTIONS[user_id] = old_questions
+
+
+def test_temporary_admin_tokens_do_not_delay_renewal_quota(monkeypatch, tmp_path):
+    user_id = 987_019
+    monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "renewal-state.json")
+    old_user = secondary._USERS.get(user_id)
+    old_questions = secondary._QUESTIONS.get(user_id)
+    was_renewal = user_id in secondary._RENEWAL_USERS
+    secondary._USERS[user_id] = {
+        "admin_token_bonus": 4,
+        "admin_token_bonus_expires_at": secondary.time.time() + 3600,
+    }
+    secondary._QUESTIONS[user_id] = [secondary.time.time()] * secondary.QUESTION_LIMIT
+    secondary._RENEWAL_USERS.discard(user_id)
+    try:
+        secondary._commit_question(user_id)
+        assert user_id not in secondary._RENEWAL_USERS
+        assert secondary._question_limit(user_id) == secondary.QUESTION_LIMIT + 4
+        assert secondary._rate_allowed(user_id) is True
+        secondary._USERS[user_id]["admin_token_bonus_expires_at"] = secondary.time.time() - 1
+        secondary._quota_status(user_id)
+        assert user_id in secondary._RENEWAL_USERS
+        assert secondary._active_admin_token_bonus(user_id) == 0
+        assert secondary._question_limit(user_id) == secondary.RENEWAL_QUESTION_LIMIT
+    finally:
+        if old_user is None:
+            secondary._USERS.pop(user_id, None)
+        else:
+            secondary._USERS[user_id] = old_user
+        if old_questions is None:
+            secondary._QUESTIONS.pop(user_id, None)
+        else:
+            secondary._QUESTIONS[user_id] = old_questions
+        if was_renewal:
+            secondary._RENEWAL_USERS.add(user_id)
+        else:
+            secondary._RENEWAL_USERS.discard(user_id)
+
+
+def test_admin_search_and_user_filters_find_matching_users():
+    user_id = 987_017
+    old_user = secondary._USERS.get(user_id)
+    old_banned = user_id in secondary._BANNED_USERS
+    secondary._USERS[user_id] = {
+        "first_name": "PruebaFiltro",
+        "username": "prueba_filtro",
+        "last_seen": secondary.time.time(),
+    }
+    try:
+        text, markup = secondary._admin_user_search("@prueba_filtro")
+        assert "Coincidencias: 1" in text
+        assert any(
+            button.callback_data == f"secondary:admin:user:{user_id}"
+            for row in markup.inline_keyboard for button in row
+        )
+        _text, active_markup = secondary._admin_users_page(0, "active")
+        assert any(
+            button.callback_data == f"secondary:admin:user:{user_id}"
+            for row in active_markup.inline_keyboard for button in row
+        )
+        secondary._BANNED_USERS.add(user_id)
+        _text, blocked_markup = secondary._admin_users_page(0, "blocked")
+        assert any(
+            button.callback_data == f"secondary:admin:user:{user_id}"
+            for row in blocked_markup.inline_keyboard for button in row
+        )
+    finally:
+        if old_user is None:
+            secondary._USERS.pop(user_id, None)
+        else:
+            secondary._USERS[user_id] = old_user
+        if not old_banned:
+            secondary._BANNED_USERS.discard(user_id)
+
+
+def test_only_owner_can_confirm_adding_and_removing_managed_admins(monkeypatch, tmp_path):
+    async def run():
+        owner_id = 5_721_542_653
+        target_id = 987_018
+        state_file = tmp_path / "admin-state.json"
+        monkeypatch.setattr(secondary, "STATE_FILE", state_file)
+        monkeypatch.setattr(secondary, "_ADMIN_IDS_LAST_REFRESH", 0.0)
+        old_managed = set(secondary._MANAGED_ADMIN_IDS)
+        secondary._MANAGED_ADMIN_IDS.discard(target_id)
+        context = SimpleNamespace(user_data={})
+        def update_for(user_id, text="", callback_data=None):
+            query = FakeQuery(callback_data) if callback_data else None
+            update = FakeUpdate(user_id, text=text)
+            if query:
+                update.callback_query = query
+            return update
+
+        try:
+            owner_update = update_for(owner_id, callback_data="secondary:admin:admins:add")
+            await secondary._admin_callback(owner_update, context)
+            assert context.user_data["admin_awaiting_admin_change"] == "add"
+
+            preview_update = update_for(owner_id, str(target_id))
+            await secondary._admin_text(preview_update, context)
+            assert "Confirmar cambio" in preview_update.effective_message.calls[0][0]
+            assert context.user_data["admin_change_draft"] == {"operation": "add", "user_id": target_id}
+
+            confirm_update = update_for(owner_id, callback_data="secondary:admin:admins:confirm")
+            await secondary._admin_callback(confirm_update, context)
+            assert target_id in secondary._MANAGED_ADMIN_IDS
+            saved = json.loads(state_file.read_text(encoding="utf-8"))
+            assert target_id in saved["managed_admin_ids"]
+
+            # Una persona administradora delegada no puede iniciar otro cambio de roles.
+            non_owner_update = update_for(target_id, callback_data="secondary:admin:admins:remove")
+            await secondary._admin_callback(non_owner_update, context)
+            assert "Solo el propietario" in non_owner_update.callback_query.edited[0][0]
+
+            context.user_data["admin_awaiting_admin_change"] = "remove"
+            await secondary._admin_text(update_for(owner_id, str(target_id)), context)
+            remove_update = update_for(owner_id, callback_data="secondary:admin:admins:confirm")
+            await secondary._admin_callback(remove_update, context)
+            assert target_id not in secondary._MANAGED_ADMIN_IDS
+        finally:
+            secondary._MANAGED_ADMIN_IDS.clear()
+            secondary._MANAGED_ADMIN_IDS.update(old_managed)
+            secondary.ADMIN_USER_IDS.discard(target_id)
+            secondary._ADMIN_IDS_LAST_REFRESH = 0.0
 
     asyncio.run(run())
 
@@ -951,10 +1140,12 @@ def test_personality_instructions_are_applied_by_ai_backend(monkeypatch):
     payload, status = web_store.dispatch_telegram_ai_chat(
         9_870_093, [{"role": "user", "content": "Explícame las fracciones"}],
         bypass_quota=True, persona="teacher", temperature_profile="creative",
+        response_style="detailed",
     )
     assert status == 200 and payload["ok"]
     assert "Enseña con paciencia" in captured["body"]["messages"][0]["content"]
     assert "más variedad e ideas originales" in captured["body"]["messages"][0]["content"]
+    assert "explicación amplia, ordenada y didáctica" in captured["body"]["messages"][0]["content"]
     assert captured["body"]["temperature"] == 0.8
 
 
