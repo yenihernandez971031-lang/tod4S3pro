@@ -63,7 +63,7 @@ AI_PERSONAS = {
 }
 AI_TEMPERATURES = {
     "precise": ("🎯 Precisa", 0.2),
-    "balanced": ("🌸 Equilibrada", 0.5),
+    "balanced": ("⚖️ Equilibrada", 0.5),
     "creative": ("✨ Creativa", 0.8),
 }
 STATE_FILE = Path(os.getenv("SECONDARY_AI_BOT_STATE_FILE", "/data/secondary_ai_bot_state.json"))
@@ -213,23 +213,23 @@ _refresh_admin_user_ids()
 def _join_keyboard() -> InlineKeyboardMarkup:
     rows = []
     if CHANNEL_ONE_URL:
-        rows.append([InlineKeyboardButton("🌸 Unirme al canal oficial", url=CHANNEL_ONE_URL, style="primary")])
+        rows.append([InlineKeyboardButton("📢 Canal oficial", url=CHANNEL_ONE_URL, style="primary")])
     if CHANNEL_TWO_URL:
-        rows.append([InlineKeyboardButton("🫧 Unirme al canal de novedades", url=CHANNEL_TWO_URL, style="success")])
-    rows.append([InlineKeyboardButton("✨ Ya me uní · continuar", callback_data="secondary:verify", style="success")])
+        rows.append([InlineKeyboardButton("📰 Canal de novedades", url=CHANNEL_TWO_URL, style="success")])
+    rows.append([InlineKeyboardButton("✅ Ya me uní · verificar", callback_data="secondary:verify", style="success")])
     return InlineKeyboardMarkup(rows)
 
 
 def _user_keyboard(referral_share_url: str | None = None) -> InlineKeyboardMarkup:
     rows = [[
-        InlineKeyboardButton("🌷 Mis tokens", callback_data="secondary:user:quota", style="primary"),
-        InlineKeyboardButton("🎀 Mis referidos", callback_data="secondary:user:referrals", style="success"),
+        InlineKeyboardButton("💳 Mi saldo", callback_data="secondary:user:quota", style="primary"),
+        InlineKeyboardButton("👥 Referidos", callback_data="secondary:user:referrals", style="success"),
     ]]
-    rows.append([InlineKeyboardButton("🎭 Personalidad de la IA", callback_data="secondary:user:persona", style="primary")])
-    rows.append([InlineKeyboardButton("🌡️ Temperatura de respuesta", callback_data="secondary:user:temperature", style="primary")])
+    rows.append([InlineKeyboardButton("🧠 Personalidad", callback_data="secondary:user:persona", style="primary")])
+    rows.append([InlineKeyboardButton("🌡️ Temperatura", callback_data="secondary:user:temperature", style="primary")])
     if referral_share_url:
-        rows.append([InlineKeyboardButton("💌 Invitar amistades", url=referral_share_url, style="primary")])
-    rows.append([InlineKeyboardButton("🌙 Canal y novedades", url=CHANNEL_ONE_URL, style="primary")])
+        rows.append([InlineKeyboardButton("🔗 Invitar", url=referral_share_url, style="primary")])
+    rows.append([InlineKeyboardButton("📢 Canal oficial", url=CHANNEL_ONE_URL, style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -246,7 +246,7 @@ def _persona_keyboard(current: str) -> InlineKeyboardMarkup:
                 style="success" if key == current else "primary",
             ))
         rows.append(row)
-    rows.append([InlineKeyboardButton("⬅️ Volver a mis opciones", callback_data="secondary:user:quota", style="primary")])
+    rows.append([InlineKeyboardButton("⬅️ Volver al menú", callback_data="secondary:user:quota", style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -259,17 +259,17 @@ def _temperature_keyboard(current: str) -> InlineKeyboardMarkup:
             callback_data=f"secondary:user:temperature:set:{key}",
             style="success" if key == current else "primary",
         )])
-    rows.append([InlineKeyboardButton("⬅️ Volver a mis opciones", callback_data="secondary:user:quota", style="primary")])
+    rows.append([InlineKeyboardButton("⬅️ Volver al menú", callback_data="secondary:user:quota", style="primary")])
     return InlineKeyboardMarkup(rows)
 
 
 def _join_text() -> str:
     return (
-        "୨୧ ⋆｡˚ <b>¡Bienvenido a AiTod4S3!</b> ˚｡⋆ ୨୧\n\n"
-        "🌸 <b>Un último pasito para entrar:</b> únete a los dos canales de la comunidad.\n"
-        "🫧 Después toca <b>«Ya me uní · continuar»</b> y revisaré tu acceso.\n\n"
-        "╭・Creado por <a href=\"https://t.me/Niku_Blade\">@Niku_Blade</a>\n"
-        "╰・Novedades: <a href=\"https://t.me/Dark_Zone_666\">Dark Zone</a>"
+        "🤖 <b>AiTod4S3 · Acceso</b>\n\n"
+        "Para comenzar, únete a los dos canales y pulsa <b>«Ya me uní · verificar»</b>. "
+        "Comprobaré tu acceso y habilitaré el chat.\n\n"
+        "👤 Creador: <a href=\"https://t.me/Niku_Blade\">@Niku_Blade</a>\n"
+        "📢 Novedades: <a href=\"https://t.me/Dark_Zone_666\">Dark Zone</a>"
     )
 
 
@@ -478,7 +478,7 @@ def _admin_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(toggle_text, callback_data="secondary:admin:toggle", style=toggle_style)],
             [
                 InlineKeyboardButton("📊 Estadísticas", callback_data="secondary:admin:stats", style="primary"),
-                InlineKeyboardButton("🧸 Usuarios", callback_data="secondary:admin:users:0", style="primary"),
+                InlineKeyboardButton("👥 Usuarios", callback_data="secondary:admin:users:0", style="primary"),
             ],
             [
                 InlineKeyboardButton("💌 Enviar aviso", callback_data="secondary:admin:announce", style="success"),
@@ -489,7 +489,7 @@ def _admin_keyboard() -> InlineKeyboardMarkup:
 
 
 def _admin_entry_keyboard() -> InlineKeyboardMarkup:
-    rows = [[InlineKeyboardButton("🧁 Abrir panel de administración", callback_data="secondary:admin:open", style="primary")]]
+    rows = [[InlineKeyboardButton("⚙️ Administración", callback_data="secondary:admin:open", style="primary")]]
     rows.extend(_user_keyboard().inline_keyboard)
     return InlineKeyboardMarkup(rows)
 
@@ -514,7 +514,7 @@ def _admin_panel_text() -> str:
             recent_requests += len(valid)
 
     return (
-        "୨୧ ⋆｡˚ <b>Panel de administración</b> ˚｡⋆ ୨୧\n\n"
+        "⚙️ <b>Administración · AiTod4S3</b>\n\n"
         f"{'🟢' if _AI_ENABLED else '🔴'} <b>IA:</b> {'activa' if _AI_ENABLED else 'pausada'}\n"
         f"👥 <b>Usuarios registrados:</b> {len(_USERS)}\n"
         f"🚫 <b>Usuarios bloqueados:</b> {len(_BANNED_USERS)}\n"
@@ -544,7 +544,7 @@ def _admin_stats_text() -> str:
             for values in _RECENT.values()
         )
     return (
-        "🌸 <b>Estadísticas del bot</b> 🌸\n\n"
+        "📊 <b>Estadísticas · AiTod4S3</b>\n\n"
         f"👥 Usuarios registrados: <b>{len(_USERS)}</b>\n"
         f"🚫 Usuarios bloqueados: <b>{len(_BANNED_USERS)}</b>\n"
         f"🟢 Usuarios que usaron tokens en las últimas 10 h: <b>{active_users}</b>\n"
@@ -838,7 +838,7 @@ async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                         _save_state_locked()
     if update.effective_chat.type == "private" and update.effective_user.id in ADMIN_USER_IDS:
         await update.effective_message.reply_text(
-            "୨୧ <b>¡Hola, administrador!</b> Tu panel privado está listo; pulsa el botón para abrirlo. ୨୧",
+            "👋 <b>Hola, administrador.</b> Usa los botones para abrir el panel o ajustar tus preferencias.",
             reply_markup=_admin_entry_keyboard(),
             parse_mode=ParseMode.HTML,
         )
@@ -846,7 +846,7 @@ async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if await _require_access(update, context.bot):
         rewarded = _complete_referral(update.effective_user.id)
         await update.effective_message.reply_text(
-            "🌸 <b>¡Acceso listo!</b> Envíame un mensaje y te responderé con la IA."
+            "✅ <b>Acceso confirmado.</b> Envíame un mensaje y te responderé con la IA."
             + ("\n🎁 Tu invitación fue registrada; el invitador recibió un token extra." if rewarded else ""),
             reply_markup=_user_keyboard() if update.effective_chat.type == "private" else None,
             parse_mode=ParseMode.HTML,
@@ -871,7 +871,7 @@ async def _verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             missing.append(channel)
     if missing:
         await query.edit_message_text(
-            "🌧️ <b>Aún no pude comprobar tu acceso.</b>\n\n"
+            "⚠️ <b>No pude comprobar tu acceso todavía.</b>\n\n"
             "Confirma que te uniste a los dos canales y vuelve a tocar «Ya me uní · continuar». "
             "Si ya estás dentro, espera un momento y prueba otra vez.",
             reply_markup=_join_keyboard(),
@@ -883,7 +883,7 @@ async def _verify(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _save_state_locked()
     rewarded = _complete_referral(update.effective_user.id)
     await query.edit_message_text(
-            "🌷 <b>¡Acceso listo!</b> Ya puedes escribir aquí; cada mensaje usa tokens."
+            "✅ <b>Acceso confirmado.</b> Ya puedes escribir aquí; cada mensaje usa tokens."
         + ("\n🎁 La invitación quedó confirmada; tu invitador recibió un token extra." if rewarded else ""),
         reply_markup=(
             _user_keyboard()
@@ -914,9 +914,9 @@ def _quota_text(user_id: int) -> str:
     if bonus:
         phase += f" + {bonus} extra{'' if bonus == 1 else 's'} por referidos"
     text = (
-        "୨୧ ⋆｡˚ <b>Tu saldo de tokens</b> ˚｡⋆ ୨୧\n\n"
-        f"🌸 Te quedan <b>{remaining}/{_question_limit(user_id)} tokens</b>.\n"
-        f"🎀 {phase}.\n<i>Un token permite enviar un mensaje a la IA.</i>"
+        "💳 <b>Saldo de tokens</b>\n\n"
+        f"🎟️ Te quedan <b>{remaining}/{_question_limit(user_id)} tokens</b>.\n"
+        f"↻ {phase}.\n<i>Un token permite enviar un mensaje a la IA.</i>"
     )
     if remaining == 0:
         minutes = int(wait_seconds // 60)
@@ -942,13 +942,13 @@ async def _referral_view(user_id: int, bot) -> tuple[str, InlineKeyboardMarkup]:
     link = f"https://t.me/{username}?start=ref_{user_id}"
     share_url = "https://t.me/share/url?url=" + quote(link, safe="") + "&text=" + quote("¡Únete al bot de IA!", safe="")
     text = (
-        "୨୧ ⋆｡˚ <b>Tu club de referidos</b> ˚｡⋆ ୨୧\n\n"
-        f"╭・🌷 Invitaciones confirmadas: <b>{count}</b>\n"
-        f"╰・🎁 Tokens extra: <b>{bonus}/{MAX_REFERRAL_BONUS}</b>\n\n"
+        "👥 <b>Programa de referidos</b>\n\n"
+        f"📈 Invitaciones confirmadas: <b>{count}</b>\n"
+        f"🎟️ Tokens extra: <b>{bonus}/{MAX_REFERRAL_BONUS}</b>\n\n"
         "Cada amistad que se una a los dos canales y confirme su acceso te regala "
         "<b>1 token adicional</b> en tus ventanas de 10 horas, hasta un máximo de 10.\n\n"
-        f"💌 <b>Tu enlace personal</b>\n<code>{escape(link)}</code>\n\n"
-        "Toca <b>Invitar amistades</b> para compartirlo directamente desde Telegram."
+        f"🔗 <b>Tu enlace personal</b>\n<code>{escape(link)}</code>\n\n"
+        "Usa el botón <b>Invitar</b> para compartirlo desde Telegram."
     )
     return text, _user_keyboard(share_url)
 
@@ -1000,7 +1000,7 @@ async def _user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             current = "balanced"
         label, value = AI_TEMPERATURES[current]
         text = (
-            "୨୧ ⋆｡˚ <b>Elige la temperatura de respuesta</b> ˚｡⋆ ୨୧\n\n"
+            "🌡️ <b>Temperatura de respuesta</b>\n\n"
             f"Actual: <b>{escape(label)} · {value:.1f}</b>\n"
             "Más baja = respuestas más precisas; más alta = más variedad e ideas creativas."
         )
@@ -1011,14 +1011,14 @@ async def _user_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             info["persona"] = persona_key
             _save_state_locked()
         label = AI_PERSONAS[persona_key][0]
-        text = f"🌸 Modo actualizado a <b>{escape(label)}</b>. Se aplicará a tus próximas preguntas."
+        text = f"✅ Personalidad actualizada a <b>{escape(label)}</b>. Se aplicará a tus próximos mensajes."
         keyboard = _persona_keyboard(persona_key)
     elif action == "persona":
         current = str(_USERS.get(user.id, {}).get("persona", "normal"))
         if current not in AI_PERSONAS:
             current = "normal"
         text = (
-            "୨୧ ⋆｡˚ <b>Elige cómo quieres que te ayude</b> ˚｡⋆ ୨୧\n\n"
+            "🧠 <b>Personalidad de la IA</b>\n\n"
             f"Modo actual: <b>{escape(AI_PERSONAS[current][0])}</b>\n"
             "Hay seis opciones breves; la elección se guarda para próximos despliegues."
         )
@@ -1055,9 +1055,9 @@ def _identity_reply(prompt: str) -> str | None:
     ):
         return None
     return (
-        "୨୧ ⋆｡˚ <b>Soy AiTod4S3</b> ˚｡⋆ ୨୧\n\n"
-        "🌸 Este bot fue creado y es administrado por <a href=\"https://t.me/Niku_Blade\">@Niku_Blade</a>.\n"
-        "🌙 Puedes encontrar las novedades en <a href=\"https://t.me/Dark_Zone_666\">Dark Zone</a>.\n\n"
+        "🤖 <b>AiTod4S3</b>\n\n"
+        "Creado y administrado por <a href=\"https://t.me/Niku_Blade\">@Niku_Blade</a>.\n"
+        "Novedades: <a href=\"https://t.me/Dark_Zone_666\">Dark Zone</a>.\n\n"
         "Por privacidad, no comparto detalles técnicos internos del servicio de IA."
     )
 
@@ -1160,7 +1160,7 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         _commit_question(user.id)
         remaining, _ = _quota_status(user.id)
         response_text += (
-            f"\n\n<i>🌸 Te quedan {remaining}/{_question_limit(user.id)} tokens. "
+            f"\n\n<i>🎟️ Te quedan {remaining}/{_question_limit(user.id)} tokens. "
             f"Al agotar los {QUESTION_LIMIT} tokens iniciales, tendrás {RENEWAL_QUESTION_LIMIT} tokens por cada ventana de 10 h.</i>"
         )
     await progress_message.edit_text(

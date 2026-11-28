@@ -1034,9 +1034,6 @@ def delete_delivery_for_token(token: str, task_id: str) -> tuple[dict, int]:
     task_id = task_id.strip()
     row = sync_api.delivery_for_user(user_id, task_id)
     if row is None:
-        if sync_api.has_delivery_without_task_id(user_id):
-            return {"ok": False, "error": "legacy_delivery_incomplete",
-                    "message": "La entrega antigua está sin task_id; no se intentó borrar."}, 409
         return {"ok": False, "error": "delivery_not_found"}, 404
     if row.get("source", "tod4s3_bot") != "tod4s3_bot":
         return {"ok": False, "error": "delivery_source_not_supported",

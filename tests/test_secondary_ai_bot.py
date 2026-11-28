@@ -89,7 +89,7 @@ def test_join_keyboard_has_two_channel_links_and_visual_continue_button():
     assert callbacks == ["secondary:verify"]
     assert secondary.CHANNEL_ONE_URL in urls
     assert secondary.CHANNEL_TWO_URL in urls
-    assert any("continuar" in button.text for button in buttons)
+    assert any("verificar" in button.text for button in buttons)
     assert [button.style for button in buttons] == ["primary", "success", "success"]
 
 
@@ -101,7 +101,7 @@ def test_unconfirmed_chat_requires_both_channels_and_shows_styled_panel():
 
         assert not await secondary._require_access(update)
         text, options = update.effective_message.calls[0]
-        assert "¡Bienvenido a AiTod4S3!" in text
+        assert "AiTod4S3 · Acceso" in text
         assert "dos canales" in text
         assert options["reply_markup"] is not None
 
@@ -122,7 +122,7 @@ def test_confirmed_member_unlocks_bot_after_both_memberships_are_checked():
 
         assert query.answers
         assert user_id in secondary._JOIN_CONFIRMED
-        assert "Acceso listo" in query.edited[0][0]
+        assert "Acceso confirmado" in query.edited[0][0]
         assert await secondary._require_access(FakeUpdate(user_id))
 
     asyncio.run(run())
@@ -151,7 +151,7 @@ def test_verify_keeps_user_blocked_if_either_channel_membership_is_missing():
         )
         await secondary._verify(update, SimpleNamespace(bot=bot))
         assert user_id not in secondary._JOIN_CONFIRMED
-        assert "Aún no pude comprobar" in query.edited[0][0]
+        assert "No pude comprobar tu acceso" in query.edited[0][0]
         assert query.edited[0][1]["reply_markup"] is not None
 
     asyncio.run(run())
@@ -206,7 +206,7 @@ def test_admin_panel_is_private_and_only_available_to_configured_admin():
         admin_update = FakeUpdate(admin_id)
         await secondary._admin(admin_update, SimpleNamespace())
         admin_text, admin_options = admin_update.effective_message.calls[0]
-        assert "Panel de administración" in admin_text
+        assert "Administración · AiTod4S3" in admin_text
         assert admin_options["reply_markup"] is not None
         assert "pausar" in admin_options["reply_markup"].inline_keyboard[0][0].text.lower()
 
@@ -214,7 +214,7 @@ def test_admin_panel_is_private_and_only_available_to_configured_admin():
         await secondary._admin(other_update, SimpleNamespace())
         other_text = other_update.effective_message.calls[0][0]
         assert "No tienes permiso" in other_text
-        assert "Panel de administración" not in other_text
+        assert "Administración · AiTod4S3" not in other_text
 
         group_update = FakeUpdate(admin_id, chat_id=-1001, chat_type="group")
         await secondary._admin(group_update, SimpleNamespace())
@@ -257,7 +257,7 @@ def test_admin_statistics_button_opens_a_distinct_statistics_view():
             effective_chat=SimpleNamespace(type="private"),
         )
         await secondary._admin_callback(update, SimpleNamespace(user_data={}, bot=FakeBroadcaster()))
-        assert "Estadísticas del bot" in query.edited[0][0]
+        assert "Estadísticas · AiTod4S3" in query.edited[0][0]
         assert "Usuarios registrados" in query.edited[0][0]
         back = query.edited[0][1]["reply_markup"].inline_keyboard[0][0]
         assert back.callback_data == "secondary:admin:refresh"
@@ -285,7 +285,7 @@ def test_start_shows_admin_panel_and_user_preferences_to_owner_in_private_chat()
 
         stranger_update = FakeUpdate(654)
         await secondary._start(stranger_update, SimpleNamespace(bot=FakeBot()))
-        assert stranger_update.effective_message.calls[0][0].startswith("୨୧ ⋆｡˚ <b>¡Bienvenido")
+        assert stranger_update.effective_message.calls[0][0].startswith("🤖 <b>AiTod4S3 · Acceso")
         assert "secondary:admin:open" not in str(stranger_update.effective_message.calls[0][1])
 
     asyncio.run(run())
@@ -857,7 +857,7 @@ def test_personality_selector_saves_choice_to_shared_persistent_state(monkeypatc
             effective_chat=SimpleNamespace(type="private"),
         )
         await secondary._user_callback(menu_update, SimpleNamespace())
-        assert "Elige cómo quieres" in menu_query.edited[0][0]
+        assert "Personalidad de la IA" in menu_query.edited[0][0]
         writer_button = next(
             button
             for row in menu_query.edited[0][1]["reply_markup"].inline_keyboard
