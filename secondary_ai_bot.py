@@ -51,10 +51,10 @@ ADMIN_USER_IDS = {5721542653}
 def _join_keyboard() -> InlineKeyboardMarkup:
     rows = []
     if CHANNEL_ONE_URL:
-        rows.append([InlineKeyboardButton("🔵 Abrir canal oficial", url=CHANNEL_ONE_URL)])
+        rows.append([InlineKeyboardButton("🔵 Abrir canal oficial", url=CHANNEL_ONE_URL, style="primary")])
     if CHANNEL_TWO_URL:
-        rows.append([InlineKeyboardButton("🟣 Abrir canal secundario", url=CHANNEL_TWO_URL)])
-    rows.append([InlineKeyboardButton("✅ Ya me uní · continuar", callback_data="secondary:verify")])
+        rows.append([InlineKeyboardButton("🟣 Abrir canal secundario", url=CHANNEL_TWO_URL, style="success")])
+    rows.append([InlineKeyboardButton("✅ Ya me uní · continuar", callback_data="secondary:verify", style="success")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -112,7 +112,13 @@ def _rate_allowed(user_id: int) -> bool:
 
 def _admin_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        [[InlineKeyboardButton("🔄 Actualizar estadísticas", callback_data="secondary:admin:refresh")]]
+        [[InlineKeyboardButton("🔄 Actualizar estadísticas", callback_data="secondary:admin:refresh", style="primary")]]
+    )
+
+
+def _admin_entry_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🛠️ Abrir panel admin", callback_data="secondary:admin:open", style="primary")]]
     )
 
 
@@ -180,7 +186,14 @@ async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.effective_message:
+    if not update.effective_message or not update.effective_user or not update.effective_chat:
+        return
+    if update.effective_chat.type == "private" and update.effective_user.id in ADMIN_USER_IDS:
+        await update.effective_message.reply_text(
+            "👋 <b>Hola, administrador.</b> Usa el botón para abrir tu panel privado.",
+            reply_markup=_admin_entry_keyboard(),
+            parse_mode=ParseMode.HTML,
+        )
         return
     if await _require_access(update, context.bot):
         await update.effective_message.reply_text(

@@ -71,6 +71,7 @@ def test_join_keyboard_has_two_channel_links_and_visual_continue_button():
     assert secondary.CHANNEL_ONE_URL in urls
     assert secondary.CHANNEL_TWO_URL in urls
     assert any("continuar" in button.text for button in buttons)
+    assert [button.style for button in buttons] == ["primary", "success", "success"]
 
 
 def test_unconfirmed_chat_shows_optional_styled_channel_panel():
@@ -180,6 +181,25 @@ def test_admin_refresh_callback_denies_other_users():
 
         assert query.answers[0][1]["show_alert"] is True
         assert query.edited == []
+
+    asyncio.run(run())
+
+
+def test_start_shows_admin_panel_entry_only_to_owner_in_private_chat():
+    async def run():
+        admin_id = next(iter(secondary.ADMIN_USER_IDS))
+        admin_update = FakeUpdate(admin_id)
+        await secondary._start(admin_update, SimpleNamespace())
+        text, options = admin_update.effective_message.calls[0]
+        button = options["reply_markup"].inline_keyboard[0][0]
+        assert "administrador" in text
+        assert button.callback_data == "secondary:admin:open"
+        assert button.style == "primary"
+
+        stranger_update = FakeUpdate(654)
+        await secondary._start(stranger_update, SimpleNamespace(bot=FakeBot()))
+        assert stranger_update.effective_message.calls[0][0].startswith("✨ <b>¡Bienvenido")
+        assert "secondary:admin:open" not in str(stranger_update.effective_message.calls[0][1])
 
     asyncio.run(run())
 
