@@ -44,6 +44,7 @@ CHANNEL_TWO = "@darzPrbo"
 CHANNEL_ONE_URL = "https://t.me/Dark_Zone_666"
 CHANNEL_TWO_URL = "https://t.me/darzPrbo"
 MAX_HISTORY = 6
+MAX_CONTEXT_CHARS = 8_000
 QUESTION_LIMIT = 10
 QUESTION_WINDOW_SECONDS = 10 * 60 * 60
 STATE_FILE = Path(os.getenv("SECONDARY_AI_BOT_STATE_FILE", "/data/secondary_ai_bot_state.json"))
@@ -53,6 +54,8 @@ _QUESTIONS: dict[int, list[float]] = defaultdict(list)
 _HISTORY: dict[tuple[int, int], list[dict[str, str]]] = defaultdict(list)
 _JOIN_CONFIRMED: set[int] = set()
 ADMIN_USER_IDS = {5721542653}
+_ADMIN_IDS_LOCK = threading.Lock()
+_ADMIN_IDS_LAST_REFRESH = 0.0
 _USERS: dict[int, dict[str, Any]] = {}
 _BANNED_USERS: set[int] = set()
 _AI_ENABLED = True
@@ -95,6 +98,44 @@ def _load_state() -> None:
         log.warning("No se pudo cargar el estado del bot (%s)", type(exc).__name__)
 
 
+def _refresh_admin_user_ids() -> None:
+    """Incluye al dueño y los admins delegados en el bot principal."""
+    global _ADMIN_IDS_LAST_REFRESH
+    now = time.monotonic()
+    if now - _ADMIN_IDS_LAST_REFRESH < 30:
+        return
+    with _ADMIN_IDS_LOCK:
+        now = time.monotonic()
+        if now - _ADMIN_IDS_LAST_REFRESH < 30:
+            return
+        admin_ids = {5721542653}
+        for env_name in ("OWNER_TELEGRAM_ID", "SECONDARY_AI_ADMIN_IDS"):
+            for raw_id in os.getenv(env_name, "").replace(";", ",").split(","):
+                try:
+                    admin_id = int(raw_id.strip())
+                except ValueError:
+                    continue
+                if admin_id > 0:
+                    admin_ids.add(admin_id)
+        admin_file = Path(os.getenv("USERS_DATA_FILE", "/data/users.json"))
+        try:
+            data = json.loads(admin_file.read_text(encoding="utf-8"))
+            raw_admins = data.get("admin_users", {}) if isinstance(data, dict) else {}
+            values = raw_admins.keys() if isinstance(raw_admins, dict) else raw_admins if isinstance(raw_admins, list) else []
+            for value in values:
+                try:
+                    admin_id = int(value)
+                except (TypeError, ValueError):
+                    continue
+                if admin_id > 0:
+                    admin_ids.add(admin_id)
+        except (OSError, ValueError, TypeError):
+            pass
+        ADMIN_USER_IDS.clear()
+        ADMIN_USER_IDS.update(admin_ids)
+        _ADMIN_IDS_LAST_REFRESH = now
+
+
 def _register_user(user, chat) -> None:
     with _RATE_LOCK:
         info = _USERS.setdefault(user.id, {})
@@ -111,6 +152,7 @@ def _register_user(user, chat) -> None:
 
 
 _load_state()
+_refresh_admin_user_ids()
 
 
 def _join_keyboard() -> InlineKeyboardMarkup:
@@ -133,6 +175,7 @@ def _join_text() -> str:
 
 
 async def _require_access(update: Update, bot=None) -> bool:
+    _refresh_admin_user_ids()
     user = update.effective_user
     message = update.effective_message
     chat = update.effective_chat
@@ -172,6 +215,33 @@ def _rate_allowed(user_id: int) -> bool:
         return True
 
 
+def _refund_question(user_id: int) -> None:
+    """Devuelve el cupo reservado si la IA no produjo una respuesta."""
+    with _RATE_LOCK:
+        if _QUESTIONS.get(user_id):
+            _QUESTIONS[user_id].pop()
+        if _RECENT.get(user_id):
+            _RECENT[user_id].pop()
+        _save_state_locked()
+
+
+def _bounded_history(history: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Conserva el contexto reciente dentro de los límites del dispatcher."""
+    selected: list[dict[str, str]] = []
+    total_chars = 0
+    for item in reversed(history[-MAX_HISTORY:]):
+        role = item.get("role", "user")
+        content = str(item.get("content", ""))
+        if len(content) > 3_800:
+            content = content[:3_800] + "\n[contenido anterior recortado]"
+        if total_chars + len(content) > MAX_CONTEXT_CHARS:
+            break
+        selected.append({"role": role, "content": content})
+        total_chars += len(content)
+    selected.reverse()
+    return selected
+
+
 def _quota_status(user_id: int) -> tuple[int, float]:
     now = time.time()
     with _RATE_LOCK:
@@ -183,7 +253,9 @@ def _quota_status(user_id: int) -> tuple[int, float]:
 
 
 def _record_error(error: Exception) -> None:
-    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())} · {type(error).__name__}"
+    detail = re.match(r"[A-Za-z0-9_-]{1,64}:\d{3}", str(error))
+    safe_detail = f" · {detail.group(0)}" if detail else ""
+    entry = f"{time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())} · {type(error).__name__}{safe_detail}"
     _RECENT_ERRORS.append(entry)
     del _RECENT_ERRORS[:-20]
 
@@ -360,6 +432,7 @@ def _admin_back_keyboard() -> InlineKeyboardMarkup:
 
 
 async def _admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _refresh_admin_user_ids()
     user = update.effective_user
     chat = update.effective_chat
     message = update.effective_message
@@ -376,6 +449,7 @@ async def _admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _refresh_admin_user_ids()
     global _AI_ENABLED
     query = update.callback_query
     user = update.effective_user
@@ -510,6 +584,7 @@ async def _admin_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _refresh_admin_user_ids()
     if not update.effective_message or not update.effective_user or not update.effective_chat:
         return
     _register_user(update.effective_user, update.effective_chat)
@@ -563,7 +638,8 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not prompt or len(prompt) > 4000:
         await message.reply_text("Escribe un mensaje de hasta 4000 caracteres.")
         return
-    if not _rate_allowed(user.id):
+    is_admin = user.id in ADMIN_USER_IDS
+    if not is_admin and not _rate_allowed(user.id):
         _, wait_seconds = _quota_status(user.id)
         hours, minutes = divmod(int(wait_seconds // 60), 60)
         await message.reply_text(
@@ -573,18 +649,27 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     chat_id = update.effective_chat.id
     history = _HISTORY[(chat_id, user.id)]
     history.append({"role": "user", "content": prompt})
-    history[:] = history[-MAX_HISTORY:]
+    history[:] = _bounded_history(history)
     typing_task = asyncio.create_task(_keep_typing(context.bot, chat_id))
     progress_message = None
     try:
         progress_message = await message.reply_text("🧠 La IA está trabajando en tu respuesta…")
-        payload, status = await asyncio.to_thread(dispatch_telegram_ai_chat, user.id, list(history))
+        payload, status = await asyncio.to_thread(
+            dispatch_telegram_ai_chat, user.id, list(history), bypass_quota=is_admin
+        )
         if status != 200 or not payload.get("ok"):
-            raise RuntimeError(str(payload.get("error", "ai_unavailable")))
+            error_code = str(payload.get("error", "ai_unavailable"))
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", error_code):
+                error_code = "ai_unavailable"
+            raise RuntimeError(f"{error_code}:{status}")
         answer = str(payload["reply"]).strip()
     except Exception as exc:
-        log.exception("Fallo en IA del segundo bot")
+        log.warning("Fallo en IA del segundo bot (%s)", type(exc).__name__)
         _record_error(exc)
+        if not is_admin:
+            _refund_question(user.id)
+        if history and history[-1].get("role") == "user" and history[-1].get("content") == prompt:
+            history.pop()
         error_text = "⚠️ La IA no está disponible ahora. Inténtalo de nuevo más tarde."
         if progress_message:
             await progress_message.edit_text(error_text)
@@ -631,7 +716,10 @@ def run_secondary_ai_bot() -> None:
             time.sleep(10)
 
 
-def start_secondary_ai_bot(state_file: str | Path | None = None) -> subprocess.Popen | None:
+def start_secondary_ai_bot(
+    state_file: str | Path | None = None,
+    admin_file: str | Path | None = None,
+) -> subprocess.Popen | None:
     """Arranca el polling del bot 2 en un proceso separado del administrador."""
     if not TOKEN:
         log.info("Segundo bot de IA desactivado: falta TELEGRAM_AI_BOT_TOKEN")
@@ -644,6 +732,8 @@ def start_secondary_ai_bot(state_file: str | Path | None = None) -> subprocess.P
     child_env = os.environ.copy()
     if state_file is not None:
         child_env["SECONDARY_AI_BOT_STATE_FILE"] = str(state_file)
+    if admin_file is not None:
+        child_env["USERS_DATA_FILE"] = str(admin_file)
     process = subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "--run-secondary-ai-bot"],
         env=child_env,

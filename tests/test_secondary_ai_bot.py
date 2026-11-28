@@ -141,7 +141,7 @@ def test_group_ai_response_shows_typing_and_visible_working_message(monkeypatch)
         monkeypatch.setattr(
             secondary,
             "dispatch_telegram_ai_chat",
-            lambda _user_id, _history: ({"ok": True, "reply": "Respuesta de prueba"}, 200),
+            lambda _user_id, _history, **_kwargs: ({"ok": True, "reply": "Respuesta de prueba"}, 200),
         )
         bot = FakeBot()
         update = FakeUpdate(user_id, chat_id=chat_id, chat_type="group", text="¿Qué tal?")
@@ -251,6 +251,7 @@ def test_secondary_child_uses_the_backup_state_file(monkeypatch, tmp_path):
     monkeypatch.setattr(secondary, "TOKEN", "secondary-test-token")
     monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "primary-test-token")
     state_file = tmp_path / "secondary_ai_bot_state.json"
+    admin_file = tmp_path / "users.json"
     captured = {}
 
     def fake_popen(command, env):
@@ -259,9 +260,10 @@ def test_secondary_child_uses_the_backup_state_file(monkeypatch, tmp_path):
         return SimpleNamespace(pid=123)
 
     monkeypatch.setattr(secondary.subprocess, "Popen", fake_popen)
-    process = secondary.start_secondary_ai_bot(state_file)
+    process = secondary.start_secondary_ai_bot(state_file, admin_file)
     assert process.pid == 123
     assert captured["env"]["SECONDARY_AI_BOT_STATE_FILE"] == str(state_file)
+    assert captured["env"]["USERS_DATA_FILE"] == str(admin_file)
 
 
 def test_secondary_bot_does_not_read_ai_provider_key():
@@ -462,8 +464,125 @@ def test_telegram_ai_backend_uses_code_instructions_and_ten_hour_cap(monkeypatch
     assert status == 429
     assert limited["error"] == "ai_10_hour_limit"
     assert captured["body"]["max_tokens"] == 768
-    assert "solución completa y ejecutable" in captured["body"]["messages"][0]["content"]
+    assert "solución ejecutable" in captured["body"]["messages"][0]["content"]
+    for _ in range(12):
+        payload, status = web_store.dispatch_telegram_ai_chat(959, messages, bypass_quota=True)
+        assert status == 200 and payload["ok"]
+    assert len(web_store._AI_TELEGRAM_REQUESTS_BY_USER[959]) == 10
 
     clock[0] += secondary.QUESTION_WINDOW_SECONDS + 1
     payload, status = web_store.dispatch_telegram_ai_chat(959, messages)
     assert status == 200 and payload["ok"]
+
+
+def test_telegram_backend_refunds_quota_when_provider_fails(monkeypatch):
+    monkeypatch.setenv("IASINCENSURA", "sk-notrack-test-key-for-telegram")
+    monkeypatch.setattr(web_store, "_AI_TELEGRAM_REQUESTS_BY_USER", {})
+
+    def fail_request(*_args, **_kwargs):
+        raise web_store.urllib.error.URLError("provider unavailable")
+
+    monkeypatch.setattr(web_store.urllib.request, "urlopen", fail_request)
+    payload, status = web_store.dispatch_telegram_ai_chat(961, [{"role": "user", "content": "hola"}])
+    assert status == 503
+    assert payload["error"] == "ai_unavailable"
+    assert 961 not in web_store._AI_TELEGRAM_REQUESTS_BY_USER
+
+
+def test_chat_trims_long_history_before_sending_it_to_backend(monkeypatch, tmp_path):
+    async def run():
+        user_id = 962
+        monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "bot_state.json")
+        secondary._JOIN_CONFIRMED.add(user_id)
+        secondary._HISTORY[(user_id, user_id)] = [
+            {"role": "user", "content": "a" * 3_900},
+            {"role": "assistant", "content": "b" * 3_900},
+            {"role": "user", "content": "c" * 3_900},
+            {"role": "assistant", "content": "d" * 3_900},
+            {"role": "user", "content": "e" * 3_900},
+            {"role": "assistant", "content": "f" * 4_500},
+        ]
+        monkeypatch.setattr(secondary, "_rate_allowed", lambda _user_id: True)
+        sent_history = {}
+
+        def fake_dispatch(_user_id, messages, **_kwargs):
+            sent_history["messages"] = messages
+            return {"ok": True, "reply": "Respuesta"}, 200
+
+        monkeypatch.setattr(secondary, "dispatch_telegram_ai_chat", fake_dispatch)
+        update = FakeUpdate(user_id, text="Pregunta actual")
+        await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
+
+        messages = sent_history["messages"]
+        assert sum(len(item["content"]) for item in messages) <= secondary.MAX_CONTEXT_CHARS
+        assert messages[-1] == {"role": "user", "content": "Pregunta actual"}
+        assert all(len(item["content"]) <= 4000 for item in messages)
+        assert update.effective_message.sent[0].edits[-1][0] == "Respuesta"
+
+    asyncio.run(run())
+
+
+def test_admin_bypasses_both_local_and_backend_question_quotas(monkeypatch, tmp_path):
+    async def run():
+        admin_id = next(iter(secondary.ADMIN_USER_IDS))
+        monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "bot_state.json")
+        secondary._JOIN_CONFIRMED.add(admin_id)
+        old_questions = list(secondary._QUESTIONS.get(admin_id, []))
+        secondary._QUESTIONS[admin_id] = [secondary.time.time()] * secondary.QUESTION_LIMIT
+        monkeypatch.setattr(
+            secondary,
+            "_rate_allowed",
+            lambda _user_id: (_ for _ in ()).throw(AssertionError("El admin no debe consumir la cuota local")),
+        )
+        observed = {}
+
+        def fake_dispatch(_user_id, _messages, **kwargs):
+            observed.update(kwargs)
+            return {"ok": True, "reply": "Admin responde"}, 200
+
+        monkeypatch.setattr(secondary, "dispatch_telegram_ai_chat", fake_dispatch)
+        update = FakeUpdate(admin_id, text="Consulta del admin")
+        await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
+
+        assert observed["bypass_quota"] is True
+        assert len(secondary._QUESTIONS[admin_id]) == secondary.QUESTION_LIMIT
+        assert update.effective_message.sent[0].edits[-1][0] == "Admin responde"
+        secondary._QUESTIONS[admin_id] = old_questions
+
+    asyncio.run(run())
+
+
+def test_failed_ai_request_refunds_local_quota_and_removes_unsent_prompt(monkeypatch, tmp_path):
+    async def run():
+        user_id = 963
+        monkeypatch.setattr(secondary, "STATE_FILE", tmp_path / "bot_state.json")
+        secondary._JOIN_CONFIRMED.add(user_id)
+        secondary._QUESTIONS.pop(user_id, None)
+        secondary._HISTORY.pop((user_id, user_id), None)
+        monkeypatch.setattr(
+            secondary,
+            "dispatch_telegram_ai_chat",
+            lambda *_args, **_kwargs: ({"ok": False, "error": "conversation_too_long"}, 413),
+        )
+        update = FakeUpdate(user_id, text="Pregunta que falla")
+        await secondary._chat(update, SimpleNamespace(bot=FakeBot()))
+
+        assert secondary._QUESTIONS[user_id] == []
+        assert secondary._HISTORY[(user_id, user_id)] == []
+        assert "no está disponible" in update.effective_message.sent[0].edits[-1][0]
+
+    asyncio.run(run())
+
+
+def test_delegated_main_bot_admin_is_loaded_for_quota_exemption(monkeypatch, tmp_path):
+    admin_id = 987_654_321
+    admins_file = tmp_path / "users.json"
+    admins_file.write_text(json.dumps({"admin_users": {str(admin_id): "delegated"}}), encoding="utf-8")
+    original_admin_ids = set(secondary.ADMIN_USER_IDS)
+    monkeypatch.setattr(secondary, "ADMIN_USER_IDS", set(original_admin_ids))
+    monkeypatch.setattr(secondary, "_ADMIN_IDS_LAST_REFRESH", 0.0)
+    monkeypatch.setenv("USERS_DATA_FILE", str(admins_file))
+
+    secondary._refresh_admin_user_ids()
+
+    assert admin_id in secondary.ADMIN_USER_IDS

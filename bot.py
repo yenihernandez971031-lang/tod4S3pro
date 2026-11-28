@@ -9713,7 +9713,7 @@ def main() -> None:
         log.exception("No se pudo iniciar la tienda web de Railway")
     try:
         from secondary_ai_bot import start_secondary_ai_bot
-        start_secondary_ai_bot(SECONDARY_AI_BOT_STATE_FILE)
+        start_secondary_ai_bot(SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE)
     except Exception:
         # El bot administrador debe seguir funcionando aunque el bot de IA
         # secundario tenga una configuración incompleta o falle al arrancar.

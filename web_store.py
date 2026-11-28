@@ -349,12 +349,13 @@ def _dispatch_ai_chat(token: str, body: dict) -> tuple[dict, int]:
     return {"ok": True, "reply": answer.strip()}, 200
 
 
-def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> tuple[dict, int]:
-    """Usa el mismo proveedor/configuración de IA de la aplicación desde Telegram.
-
-    El bot secundario no recibe ni conoce credenciales del proveedor; solamente
-    entrega el identificador de Telegram y la conversación a este backend.
-    """
+def dispatch_telegram_ai_chat(
+    user_id: int,
+    messages: list[dict[str, str]],
+    *,
+    bypass_quota: bool = False,
+) -> tuple[dict, int]:
+    """Usa el proveedor de IA compartido; el bot secundario no recibe credenciales."""
     if not isinstance(user_id, int) or user_id <= 0:
         return {"ok": False, "error": "invalid_user"}, 400
     if not isinstance(messages, list) or not 1 <= len(messages) <= 12:
@@ -375,21 +376,37 @@ def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> t
     if clean[-1]["role"] != "user":
         return {"ok": False, "error": "invalid_messages"}, 400
 
-    now = time.monotonic()
-    with _AI_RATE_LOCK:
-        window = [seen for seen in _AI_TELEGRAM_REQUESTS_BY_USER.get(user_id, []) if now - seen < 10 * 60 * 60]
-        if len(window) >= 10:
-            return {"ok": False, "error": "ai_10_hour_limit"}, 429
-        window.append(now)
-        _AI_TELEGRAM_REQUESTS_BY_USER[user_id] = window
+    reservation = None
+    if not bypass_quota:
+        now = time.monotonic()
+        with _AI_RATE_LOCK:
+            window = [seen for seen in _AI_TELEGRAM_REQUESTS_BY_USER.get(user_id, []) if now - seen < 10 * 60 * 60]
+            if len(window) >= 10:
+                return {"ok": False, "error": "ai_10_hour_limit"}, 429
+            window.append(now)
+            _AI_TELEGRAM_REQUESTS_BY_USER[user_id] = window
+            reservation = now
+
+    def refund_reservation() -> None:
+        if reservation is None:
+            return
+        with _AI_RATE_LOCK:
+            window = _AI_TELEGRAM_REQUESTS_BY_USER.get(user_id, [])
+            try:
+                window.remove(reservation)
+            except ValueError:
+                return
+            if window:
+                _AI_TELEGRAM_REQUESTS_BY_USER[user_id] = window
+            else:
+                _AI_TELEGRAM_REQUESTS_BY_USER.pop(user_id, None)
 
     system = (
         "Eres AiTod4S3. Responde en el idioma del usuario, con claridad y precisión. "
         "No inventes datos ni solicites contraseñas, códigos, PIN, tokens o datos de pago. "
-        "Responde de forma directa y útil. Si la pregunta pide programación o código, incluye una solución completa y ejecutable "
-        "en bloques Markdown con triple acento invertido y etiqueta de lenguaje; incluye imports, instalación y uso cuando hagan falta. "
-        "Explica brevemente lo necesario, evita omitir partes con puntos suspensivos y mantén la respuesta concisa para reducir esperas. "
-        "Si el usuario pide información actual o fuentes, no inventes referencias."
+        "Responde directamente y de forma concisa. Si piden programación, incluye una solución ejecutable "
+        "en un bloque Markdown con lenguaje, imports y uso cuando hagan falta; no omitas partes con puntos suspensivos. "
+        "Si piden información actual o fuentes, no inventes referencias."
     )
     request_messages = [{"role": "system", "content": system}, *clean]
     latest_prompt = clean[-1]["content"].lower()
@@ -404,10 +421,11 @@ def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> t
             answer = _notrack_web_chat("\n\n".join(f"{item['role'].upper()}: {item['content']}" for item in request_messages))
             return {"ok": True, "reply": answer.strip()}, 200
         except (TimeoutError, urllib.error.URLError, OSError, RuntimeError, ValueError):
+            refund_reservation()
             return {"ok": False, "error": "ai_fallback_unavailable"}, 503
     request_body = json.dumps({
         "model": "notrack-uncensored", "messages": request_messages,
-        "max_tokens": 768 if code_request else 320, "temperature": 0.4, "stream": False,
+        "max_tokens": 768 if code_request else 256, "temperature": 0.4, "stream": False,
     }, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         "https://api.notrack.ai/v1/chat/completions", data=request_body,
@@ -415,6 +433,7 @@ def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> t
         method="POST",
     )
     if not _AI_GATEWAY_SEMAPHORE.acquire(blocking=False):
+        refund_reservation()
         return {"ok": False, "error": "ai_busy"}, 429
     try:
         with urllib.request.urlopen(request, timeout=35) as response:
@@ -424,6 +443,7 @@ def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> t
             raise ValueError("empty_answer")
         return {"ok": True, "reply": answer.strip()}, 200
     except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, IndexError, TypeError, json.JSONDecodeError):
+        refund_reservation()
         return {"ok": False, "error": "ai_unavailable"}, 503
     finally:
         _AI_GATEWAY_SEMAPHORE.release()
