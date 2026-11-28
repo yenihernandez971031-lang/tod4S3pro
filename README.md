@@ -6,11 +6,13 @@ NikuTodusS3 es un bot de Telegram que recibe archivos o enlaces públicos, los s
 
 ## Segundo bot independiente de IA
 
-El repositorio puede iniciar un segundo bot de Telegram separado del administrador. Configura únicamente `TELEGRAM_AI_BOT_TOKEN` con otro token de @BotFather; nunca reutilices `TELEGRAM_BOT_TOKEN` ni publiques ninguno de los dos tokens. El bot 2 delega la conversación al mismo backend de IA que ya usa la aplicación, sin pedir otra configuración de IA, y bloquea el chat hasta que el usuario pertenezca a `@Dark_Zone_666` y `@darzPrbo`.
+El repositorio puede iniciar un segundo bot de Telegram separado del administrador. Configura `TELEGRAM_AI_BOT_TOKEN` con un token distinto creado en @BotFather; nunca reutilices `TELEGRAM_BOT_TOKEN` ni publiques los tokens. Si falta `TELEGRAM_AI_BOT_TOKEN`, solo se inicia el bot principal. El bot 2 delega la conversación al backend de IA existente, así que no requiere una segunda clave de proveedor, y se ejecuta en un proceso separado.
 
-Agrega el segundo bot como administrador en ambos canales (con permiso para consultar miembros). Si `TELEGRAM_AI_BOT_TOKEN` está vacío, solo se inicia el bot administrador. Los canales están fijados en el código y no requieren variables adicionales. El segundo bot se ejecuta en un proceso separado para que su polling no interfiera con el administrador. Ofrece `/start`, `/reset`, botones para unirse y el botón de verificación; sus límites usan `AI_APP_DAILY_LIMIT` y mantiene únicamente un historial corto en memoria.
+Los botones de los canales `@Dark_Zone_666` y `@darzPrbo` son promocionales: abrir los canales y pulsar **Ya me uní · continuar** habilita visualmente el acceso, sin comprobar membresías. Los canales son opcionales y el bot no requiere permisos de administrador en ellos. El bot secundario ofrece `/start` y `/reset`, funciona en chats privados y grupos donde Telegram le entregue los mensajes, muestra el indicador de escritura y un estado de trabajo, conserva hasta seis mensajes de contexto y presenta el código en bloques copiables.
 
-Unirse a esos canales es opcional: el botón **Continuar al bot** abre el menú sin consultar membresías. Esta pantalla se muestra una sola vez por usuario. Los enlaces a archivos en la nube caducan a las **2 horas** para todos los planes.
+Cada usuario dispone de **10 preguntas por cada ventana móvil de 10 horas**; se libera un cupo 10 horas después de cada pregunta. En `/admin`, disponible en privado solo para el dueño con ID `5721542653`, hay estadísticas, pausa/activación de IA, lista paginada de usuarios, bloqueo/desbloqueo, reinicio de conversación, avisos con vista previa y confirmación, y errores recientes. El estado del bot se guarda en `/data/secondary_ai_bot_state.json`; monta un Volume persistente de Railway en `/data` para conservar cuota, usuarios, bloqueos y preferencias al redesplegar. Compose ya persiste `/data` en su volumen `bot-data`.
+
+Los enlaces a archivos en la nube caducan a las **2 horas** para todos los planes.
 
 Al registrarse una persona, confirmarse un referido o completarse una transferencia, el bot publica un aviso anónimo en `PUBLIC_CHANNEL_ID` (por defecto `@darzPrbo`). El aviso no incluye nombres, IDs, nombres de archivo ni enlaces; los archivos descargados no se reenvían al canal. Agrega el bot como administrador con permiso para publicar.
 

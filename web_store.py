@@ -41,6 +41,7 @@ _APP_TASK_BRIDGE_LOCK = Lock()
 _AI_RATE_LOCK = Lock()
 _AI_REQUESTS_BY_USER: dict[int, list[float]] = {}
 _AI_DAILY_REQUESTS_BY_USER: dict[int, list[float]] = {}
+_AI_TELEGRAM_REQUESTS_BY_USER: dict[int, list[float]] = {}
 _AI_DAILY_GLOBAL_REQUESTS: list[float] = []
 _NIKUDARIA_CLIENT_ID_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -376,27 +377,26 @@ def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> t
 
     now = time.monotonic()
     with _AI_RATE_LOCK:
-        recent = [seen for seen in _AI_REQUESTS_BY_USER.get(user_id, []) if now - seen < 60]
-        daily = [seen for seen in _AI_DAILY_REQUESTS_BY_USER.get(user_id, []) if now - seen < 86_400]
-        try:
-            daily_limit = max(1, min(100_000, int(os.getenv("IASINCENSURA_USER_DAILY_LIMIT", "80"))))
-        except ValueError:
-            daily_limit = 80
-        if len(recent) >= 8:
-            return {"ok": False, "error": "ai_rate_limited"}, 429
-        if len(daily) >= daily_limit:
-            return {"ok": False, "error": "ai_daily_limit"}, 429
-        recent.append(now)
-        daily.append(now)
-        _AI_REQUESTS_BY_USER[user_id] = recent
-        _AI_DAILY_REQUESTS_BY_USER[user_id] = daily
+        window = [seen for seen in _AI_TELEGRAM_REQUESTS_BY_USER.get(user_id, []) if now - seen < 10 * 60 * 60]
+        if len(window) >= 10:
+            return {"ok": False, "error": "ai_10_hour_limit"}, 429
+        window.append(now)
+        _AI_TELEGRAM_REQUESTS_BY_USER[user_id] = window
 
     system = (
         "Eres AiTod4S3. Responde en el idioma del usuario, con claridad y precisión. "
         "No inventes datos ni solicites contraseñas, códigos, PIN, tokens o datos de pago. "
-        "Responde de forma directa y útil."
+        "Responde de forma directa y útil. Si la pregunta pide programación o código, incluye una solución completa y ejecutable "
+        "en bloques Markdown con triple acento invertido y etiqueta de lenguaje; incluye imports, instalación y uso cuando hagan falta. "
+        "Explica brevemente lo necesario, evita omitir partes con puntos suspensivos y mantén la respuesta concisa para reducir esperas. "
+        "Si el usuario pide información actual o fuentes, no inventes referencias."
     )
     request_messages = [{"role": "system", "content": system}, *clean]
+    latest_prompt = clean[-1]["content"].lower()
+    code_request = bool(re.search(
+        r"\b(c[oó]digo|code|coding|fuente|programaci[oó]n|programar|programming|python|javascript|typescript|java|html|css|sql|bash|script|funci[oó]n|programa|golang|rust|kotlin|swift|php|ruby)\b",
+        latest_prompt,
+    ))
     api_key = os.getenv("IASINCENSURA", "").strip()
     valid_key = api_key.startswith("sk-notrack-") and len(api_key) >= 24 and not any(c.isspace() for c in api_key)
     if not valid_key:
@@ -407,7 +407,7 @@ def dispatch_telegram_ai_chat(user_id: int, messages: list[dict[str, str]]) -> t
             return {"ok": False, "error": "ai_fallback_unavailable"}, 503
     request_body = json.dumps({
         "model": "notrack-uncensored", "messages": request_messages,
-        "max_tokens": 320, "temperature": 0.4, "stream": False,
+        "max_tokens": 768 if code_request else 320, "temperature": 0.4, "stream": False,
     }, separators=(",", ":")).encode("utf-8")
     request = urllib.request.Request(
         "https://api.notrack.ai/v1/chat/completions", data=request_body,
