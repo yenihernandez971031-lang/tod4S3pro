@@ -8975,6 +8975,18 @@ async def restore_backup_with_retries(
     return (0, 0, False), True
 
 
+def _launch_secondary_ai_process(application: Application) -> None:
+    """Inicia el bot IA antes de otras tareas, tras proteger el estado compartido."""
+    try:
+        from secondary_ai_bot import start_secondary_ai_bot
+        process = start_secondary_ai_bot(SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE)
+        application.bot_data["secondary_ai_bot_process"] = process
+        if process is None:
+            log.error("El proceso del bot IA no se inició; verifica TELEGRAM_AI_BOT_TOKEN.")
+    except Exception:
+        log.exception("No se pudo iniciar el proceso del bot IA después de restaurar el backup")
+
+
 async def post_init(application: Application) -> None:
     loop = asyncio.get_running_loop()
     from web_store import configure_app_backup_notifier, configure_app_task_bridge
@@ -9019,6 +9031,7 @@ async def post_init(application: Application) -> None:
     log.info("Ruta de autenticación Telegram: %s", backup_layout.auth_dir)
     if not backup_chat_id:
         log.error("No hay destino de respaldo: configura TELEGRAM_BACKUP_CHAT_ID.")
+        _launch_secondary_ai_process(application)
     else:
         log.info("Destino de respaldo configurado: %s", backup_chat_id)
     log.info("Canal público de avisos configurado: %s", PUBLIC_CHANNEL_ID)
@@ -9033,6 +9046,8 @@ async def post_init(application: Application) -> None:
             backup_layout,
             logger=log,
         )
+        # La restauración terminó; habilitar /start antes de otras tareas.
+        _launch_secondary_ai_process(application)
         log.info(
             "Restauración inicial terminada: encontrada=%s archivos=%d bytes=%d",
             restore_found, restored_files, restored_bytes,
@@ -9144,14 +9159,6 @@ async def post_init(application: Application) -> None:
             log.info("Respaldo confirmado después de conectar el bot.")
         except Exception as exc:
             log.warning("No se pudo confirmar el respaldo después de conectar (%s).", type(exc).__name__)
-    # El bot IA debe leer el estado compartido solo después de restaurar la copia.
-    try:
-        from secondary_ai_bot import start_secondary_ai_bot
-        application.bot_data["secondary_ai_bot_process"] = start_secondary_ai_bot(
-            SECONDARY_AI_BOT_STATE_FILE, USERS_DATA_FILE
-        )
-    except Exception:
-        log.exception("No se pudo iniciar el bot de IA después de restaurar el backup")
     if application.bot_data.get("task_queue"):
         ensure_task_workers(application)
         application.bot_data["task_worker_supervisor"] = asyncio.create_task(
