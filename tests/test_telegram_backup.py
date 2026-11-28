@@ -519,6 +519,10 @@ class RestoreBeforeMtprotoTests(unittest.IsolatedAsyncioTestCase):
                 events.append("backup")
                 return True
 
+            async def fake_stop_ai():
+                events.append("stop_ai")
+                return True
+
             async def idle_backup(*_args, **_kwargs):
                 await asyncio.sleep(3600)
 
@@ -558,13 +562,50 @@ class RestoreBeforeMtprotoTests(unittest.IsolatedAsyncioTestCase):
                 telegram_bot, "backup_to_telegram", side_effect=fake_backup
             ), patch.object(telegram_bot, "periodic_backup", side_effect=idle_backup), patch.object(
                 telegram_bot, "TelegramClient", side_effect=construct_client
+            ), patch.object(
+                telegram_bot, "_stop_secondary_ai_process_for_restore", side_effect=fake_stop_ai
+            ), patch.object(
+                telegram_bot, "_launch_secondary_ai_process", side_effect=lambda: events.append("launch_ai")
+            ), patch.object(
+                telegram_bot, "_SECONDARY_AI_BOT_PROCESS", object()
             ):
                 await telegram_bot.post_init(app)
+                self.assertLess(events.index("stop_ai"), events.index("restore"))
                 self.assertLess(events.index("restore"), events.index("construct_mtproto"))
                 self.assertLess(events.index("restore"), events.index("start_mtproto"))
+                self.assertLess(events.index("restore"), events.index("launch_ai"))
                 self.assertLess(events.index("start_mtproto"), len(events) - 1)
                 self.assertEqual(events[-1], "backup")
                 await telegram_bot.post_shutdown(app)
+
+    async def test_ai_process_stops_and_waits_before_backup_restore(self):
+        events = []
+
+        class FakeProcess:
+            returncode = None
+
+            def poll(self):
+                return self.returncode
+
+            def terminate(self):
+                events.append("terminate")
+
+            def wait(self, timeout=None):
+                events.append("wait")
+                self.returncode = 0
+                return 0
+
+            def kill(self):
+                events.append("kill")
+                self.returncode = -9
+
+        with patch.object(telegram_bot, "_SECONDARY_AI_BOT_PROCESS", FakeProcess()), patch.object(
+            telegram_bot, "_launch_secondary_ai_process", side_effect=lambda: events.append("launch")
+        ):
+            stopped = await telegram_bot._stop_secondary_ai_process_for_restore()
+
+        self.assertTrue(stopped)
+        self.assertEqual(events, ["terminate", "wait"])
 
     async def test_post_init_preserves_existing_backup_when_restore_writes_nothing(self):
         with tempfile.TemporaryDirectory() as temp:

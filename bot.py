@@ -8990,6 +8990,30 @@ def _launch_secondary_ai_process() -> None:
         log.exception("No se pudo iniciar el proceso independiente del bot IA")
 
 
+async def _stop_secondary_ai_process_for_restore() -> bool:
+    """Stop the AI process before replacing its on-disk state from a backup."""
+    global _SECONDARY_AI_BOT_PROCESS
+    process = _SECONDARY_AI_BOT_PROCESS
+    if process is None:
+        return False
+    try:
+        if process.poll() is None:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+            try:
+                await asyncio.to_thread(process.wait, timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                await asyncio.to_thread(process.wait)
+        _SECONDARY_AI_BOT_PROCESS = None
+        return True
+    except Exception:
+        log.exception("No se pudo detener el bot IA antes de restaurar el backup")
+        return False
+
+
 async def post_init(application: Application) -> None:
     loop = asyncio.get_running_loop()
     from web_store import configure_app_backup_notifier, configure_app_task_bridge
@@ -9039,7 +9063,13 @@ async def post_init(application: Application) -> None:
     log.info("Canal público de avisos configurado: %s", PUBLIC_CHANNEL_ID)
 
     # Restaurar datos antes de abrir la sesión MTProto de Telegram.
+    secondary_ai_was_running = bool(_SECONDARY_AI_BOT_PROCESS)
+    secondary_ai_stopped_for_restore = False
     if backup_chat_id:
+        if secondary_ai_was_running:
+            secondary_ai_stopped_for_restore = await _stop_secondary_ai_process_for_restore()
+            if not secondary_ai_stopped_for_restore:
+                raise RuntimeError("No se pudo pausar el bot IA antes de restaurar los usuarios.")
         restore_pointer_exists = (backup_layout.data_dir / ".telegram_backup_message_id").is_file()
         (restored_files, restored_bytes, restore_found), restore_failed = await restore_backup_with_retries(
             application.bot,
@@ -9100,6 +9130,11 @@ async def post_init(application: Application) -> None:
                 should_run=lambda: not application.bot_data.get("telegram_backup_hold", False),
             )
         )
+
+    # La IA se relanza después de restaurar para que cargue los usuarios del JSON
+    # y no escriba su estado previo mientras el backup reemplaza el archivo.
+    if secondary_ai_stopped_for_restore:
+        _launch_secondary_ai_process()
 
     identity = await application.bot.get_me()
     application.bot_data["bot_username"] = identity.username or os.getenv("BOT_USERNAME", "jk_down_bot")

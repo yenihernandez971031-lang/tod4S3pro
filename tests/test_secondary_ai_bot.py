@@ -1155,7 +1155,10 @@ def test_secondary_bot_starts_independently_of_primary_post_init():
     source = Path(primary.__file__).read_text(encoding="utf-8")
     post_init = source[source.index("async def post_init("):source.index("def main()")]
     main = source[source.index("def main()") :]
-    assert "_launch_secondary_ai_process" not in post_init
+    stop_index = post_init.index("_stop_secondary_ai_process_for_restore()")
+    restore_index = post_init.index("await restore_backup_with_retries(")
+    reload_index = post_init.index("_launch_secondary_ai_process()")
+    assert stop_index < restore_index < reload_index
     launch_index = main.index("_launch_secondary_ai_process()")
     polling_index = main.index("application.run_polling(")
     assert launch_index < polling_index
