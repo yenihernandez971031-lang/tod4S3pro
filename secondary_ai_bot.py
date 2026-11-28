@@ -1,6 +1,6 @@
 """Segundo bot de Telegram para usar AiTod4S3 con suscripción obligatoria.
 
-El token se configura únicamente mediante SECONDARY_TELEGRAM_BOT_TOKEN.
+El token se configura únicamente mediante TELEGRAM_AI_BOT_TOKEN.
 Este bot es independiente del bot administrador, pero delega la IA al backend
 compartido que ya utiliza la aplicación.
 """
@@ -20,7 +20,10 @@ from web_store import dispatch_telegram_ai_chat
 
 log = logging.getLogger("secondary-ai-bot")
 
-TOKEN = os.getenv("SECONDARY_TELEGRAM_BOT_TOKEN", "").strip()
+TOKEN = (
+    os.getenv("TELEGRAM_AI_BOT_TOKEN", "").strip()
+    or os.getenv("SECONDARY_TELEGRAM_BOT_TOKEN", "").strip()
+)
 # Canales obligatorios del bot 2; no requieren variables de entorno adicionales.
 CHANNEL_ONE = "@Dark_Zone_666"
 CHANNEL_TWO = "@darzPrbo"
@@ -68,12 +71,12 @@ async def _membership_status(bot, user_id: int) -> tuple[bool, bool, list[str]]:
     return not missing and not failed, failed, missing
 
 
-async def _require_access(update: Update) -> bool:
+async def _require_access(update: Update, bot=None) -> bool:
     user = update.effective_user
     message = update.effective_message
     if not user or not message or getattr(update.effective_chat, "type", None) != "private":
         return False
-    allowed, failed, missing = await _membership_status(update.get_bot(), user.id)
+    allowed, failed, missing = await _membership_status(bot or update.get_bot(), user.id)
     if failed:
         await message.reply_text("No pude verificar las suscripciones ahora. Asegúrate de que este bot sea administrador en ambos canales e inténtalo de nuevo.", reply_markup=_join_keyboard())
         return False
@@ -102,7 +105,7 @@ def _rate_allowed(user_id: int) -> bool:
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.effective_message or getattr(update.effective_chat, "type", None) != "private":
         return
-    if await _require_access(update):
+    if await _require_access(update, context.bot):
         await update.effective_message.reply_text("✅ Ya tienes acceso. Envíame tu pregunta y responderé con la IA.")
 
 
@@ -129,7 +132,7 @@ async def _reset(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _require_access(update):
+    if not await _require_access(update, context.bot):
         return
     user = update.effective_user
     message = update.effective_message
@@ -162,11 +165,11 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def start_secondary_ai_bot() -> threading.Thread | None:
     """Arranca el segundo polling en un hilo, sin alterar el bot administrador."""
     if not TOKEN:
-        log.info("Segundo bot de IA desactivado: falta SECONDARY_TELEGRAM_BOT_TOKEN")
+        log.info("Segundo bot de IA desactivado: falta TELEGRAM_AI_BOT_TOKEN")
         return None
     primary_token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
     if primary_token and TOKEN == primary_token:
-        log.error("Segundo bot desactivado: SECONDARY_TELEGRAM_BOT_TOKEN no puede reutilizar TELEGRAM_BOT_TOKEN")
+        log.error("Segundo bot desactivado: el token del bot 2 no puede reutilizar TELEGRAM_BOT_TOKEN")
         return None
 
     def runner() -> None:
@@ -176,7 +179,14 @@ def start_secondary_ai_bot() -> threading.Thread | None:
         application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
         log.info("Segundo bot de IA iniciado; canales requeridos: %s y %s", CHANNEL_ONE, CHANNEL_TWO)
-        application.run_polling(drop_pending_updates=False, stop_signals=None)
+        try:
+            application.run_polling(
+                drop_pending_updates=False,
+                bootstrap_retries=-1,
+                stop_signals=None,
+            )
+        except Exception:
+            log.exception("El segundo bot de IA no pudo mantener el polling")
 
     thread = threading.Thread(target=runner, name="secondary-ai-bot", daemon=True)
     thread.start()
