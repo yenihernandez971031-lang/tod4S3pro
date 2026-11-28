@@ -4,6 +4,12 @@
 
 NikuTodusS3 es un bot de Telegram que recibe archivos o enlaces públicos, los sube a ToDus S3 y devuelve enlaces de descarga. Incluye cola de tareas, historial y controles para pausar o reanudar. Las descargas normales usan el chat privado; las respuestas automáticas de APK y soporte se limitan al grupo `@grupozonaoscura`.
 
+## Segundo bot independiente de IA
+
+El repositorio puede iniciar un segundo bot de Telegram separado del administrador. Configura únicamente `SECONDARY_TELEGRAM_BOT_TOKEN` con otro token de @BotFather; nunca reutilices `TELEGRAM_BOT_TOKEN` ni publiques ninguno de los dos tokens. Este bot usa la misma clave privada `IASINCENSURA` del servicio y permite conversar con AiTod4S3, pero bloquea el chat hasta que el usuario pertenezca a `@Dark_Zone_666` y `@darzPrbo`.
+
+Agrega el segundo bot como administrador en ambos canales (con permiso para consultar miembros). Si `SECONDARY_TELEGRAM_BOT_TOKEN` está vacío, solo se inicia el bot administrador. Los canales están fijados en el código y no requieren variables adicionales. El segundo bot ofrece `/start`, `/reset`, botones para unirse y el botón de verificación; sus límites usan `AI_APP_DAILY_LIMIT` y mantiene únicamente un historial corto en memoria.
+
 Unirse a esos canales es opcional: el botón **Continuar al bot** abre el menú sin consultar membresías. Esta pantalla se muestra una sola vez por usuario. Los enlaces a archivos en la nube caducan a las **2 horas** para todos los planes.
 
 Al registrarse una persona, confirmarse un referido o completarse una transferencia, el bot publica un aviso anónimo en `PUBLIC_CHANNEL_ID` (por defecto `@darzPrbo`). El aviso no incluye nombres, IDs, nombres de archivo ni enlaces; los archivos descargados no se reenvían al canal. Agrega el bot como administrador con permiso para publicar.

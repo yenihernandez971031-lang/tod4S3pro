@@ -9707,6 +9707,13 @@ def main() -> None:
         start_store_server(profile_checker=sync_app_profile, profile_photo_checker=sync_app_profile_photo)
     except Exception:
         log.exception("No se pudo iniciar la tienda web de Railway")
+    try:
+        from secondary_ai_bot import start_secondary_ai_bot
+        start_secondary_ai_bot()
+    except Exception:
+        # El bot administrador debe seguir funcionando aunque el bot de IA
+        # secundario tenga una configuración incompleta o falle al arrancar.
+        log.exception("No se pudo iniciar el segundo bot de IA")
     token = os.getenv("TELEGRAM_BOT_TOKEN", "").strip() or TELEGRAM_BOT_TOKEN.strip()
     if not token:
         raise RuntimeError("Falta TELEGRAM_BOT_TOKEN en el entorno o archivo")
