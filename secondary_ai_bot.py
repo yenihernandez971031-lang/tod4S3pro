@@ -1,4 +1,4 @@
-"""Segundo bot de Telegram para usar AiTod4S3 con suscripción obligatoria.
+"""Segundo bot de Telegram para usar AiTod4S3 con acceso por confirmación visual.
 
 El token se configura únicamente mediante TELEGRAM_AI_BOT_TOKEN.
 Este bot es independiente del bot administrador, pero delega la IA al backend
@@ -45,6 +45,7 @@ _RECENT = defaultdict(list)
 _DAILY = defaultdict(list)
 _HISTORY: dict[tuple[int, int], list[dict[str, str]]] = defaultdict(list)
 _JOIN_CONFIRMED: set[int] = set()
+ADMIN_USER_IDS = {5721542653}
 
 
 def _join_keyboard() -> InlineKeyboardMarkup:
@@ -89,12 +90,16 @@ async def _keep_typing(bot, chat_id: int) -> None:
         await asyncio.sleep(4)
 
 
+def _daily_limit() -> int:
+    try:
+        return max(1, min(1000, int(os.getenv("AI_APP_DAILY_LIMIT", "80"))))
+    except ValueError:
+        return 80
+
+
 def _rate_allowed(user_id: int) -> bool:
     now = time.monotonic()
-    try:
-        daily_limit = max(1, min(1000, int(os.getenv("AI_APP_DAILY_LIMIT", "80"))))
-    except ValueError:
-        daily_limit = 80
+    daily_limit = _daily_limit()
     with _RATE_LOCK:
         _RECENT[user_id] = [value for value in _RECENT[user_id] if now - value < 60]
         _DAILY[user_id] = [value for value in _DAILY[user_id] if now - value < 86_400]
@@ -103,6 +108,75 @@ def _rate_allowed(user_id: int) -> bool:
         _RECENT[user_id].append(now)
         _DAILY[user_id].append(now)
         return True
+
+
+def _admin_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton("🔄 Actualizar estadísticas", callback_data="secondary:admin:refresh")]]
+    )
+
+
+def _admin_panel_text() -> str:
+    now = time.monotonic()
+    day_ago = now - 86_400
+    minute_ago = now - 60
+    with _RATE_LOCK:
+        active_users = 0
+        daily_requests = 0
+        recent_requests = 0
+        for user_id, values in list(_DAILY.items()):
+            valid = [value for value in values if value > day_ago]
+            _DAILY[user_id] = valid
+            if valid:
+                active_users += 1
+                daily_requests += len(valid)
+        for user_id, values in list(_RECENT.items()):
+            valid = [value for value in values if value > minute_ago]
+            _RECENT[user_id] = valid
+            recent_requests += len(valid)
+
+    return (
+        "🛠️ <b>Panel de administración</b>\n\n"
+        "🟢 <b>Bot:</b> en línea\n"
+        f"👥 <b>Usuarios activos (24 h):</b> {active_users}\n"
+        f"💬 <b>Solicitudes a la IA (24 h):</b> {daily_requests}\n"
+        f"⚡ <b>Solicitudes (último minuto):</b> {recent_requests}\n"
+        f"🎯 <b>Límite diario por usuario:</b> {_daily_limit()}\n\n"
+        "<i>Las estadísticas se reinician cuando se reinicia el proceso del bot.</i>"
+    )
+
+
+async def _admin(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    chat = update.effective_chat
+    message = update.effective_message
+    if not user or not chat or not message or chat.type != "private":
+        return
+    if user.id not in ADMIN_USER_IDS:
+        await message.reply_text("⛔ No tienes permiso para abrir este panel.")
+        return
+    await message.reply_text(
+        _admin_panel_text(),
+        reply_markup=_admin_keyboard(),
+        parse_mode=ParseMode.HTML,
+    )
+
+
+async def _admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    user = update.effective_user
+    chat = update.effective_chat
+    if not query:
+        return
+    if not user or user.id not in ADMIN_USER_IDS or not chat or chat.type != "private":
+        await query.answer("No autorizado.", show_alert=True)
+        return
+    await query.answer()
+    await query.edit_message_text(
+        _admin_panel_text(),
+        reply_markup=_admin_keyboard(),
+        parse_mode=ParseMode.HTML,
+    )
 
 
 async def _start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -154,14 +228,20 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     history.append({"role": "user", "content": prompt})
     history[:] = history[-MAX_HISTORY:]
     typing_task = asyncio.create_task(_keep_typing(context.bot, chat_id))
+    progress_message = None
     try:
+        progress_message = await message.reply_text("🧠 La IA está trabajando en tu respuesta…")
         payload, status = await asyncio.to_thread(dispatch_telegram_ai_chat, user.id, list(history))
         if status != 200 or not payload.get("ok"):
             raise RuntimeError(str(payload.get("error", "ai_unavailable")))
         answer = str(payload["reply"]).strip()
     except Exception:
         log.exception("Fallo en IA del segundo bot")
-        await message.reply_text("La IA no está disponible en este momento. Inténtalo de nuevo más tarde.")
+        error_text = "⚠️ La IA no está disponible ahora. Inténtalo de nuevo más tarde."
+        if progress_message:
+            await progress_message.edit_text(error_text)
+        else:
+            await message.reply_text(error_text)
         return
     finally:
         typing_task.cancel()
@@ -171,7 +251,7 @@ async def _chat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             pass
     history.append({"role": "assistant", "content": answer})
     history[:] = history[-MAX_HISTORY:]
-    await message.reply_text(answer[:4096])
+    await progress_message.edit_text(answer[:4096])
 
 
 def run_secondary_ai_bot() -> None:
@@ -179,8 +259,10 @@ def run_secondary_ai_bot() -> None:
     while True:
         try:
             application = Application.builder().token(TOKEN).build()
+            application.add_handler(CommandHandler("admin", _admin))
             application.add_handler(CommandHandler("start", _start))
             application.add_handler(CommandHandler("reset", _reset))
+            application.add_handler(CallbackQueryHandler(_admin_callback, pattern=r"^secondary:admin:"))
             application.add_handler(CallbackQueryHandler(_verify, pattern=r"^secondary:verify$"))
             application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _chat))
             log.info("Segundo bot de IA iniciado; canales promocionados: %s y %s", CHANNEL_ONE, CHANNEL_TWO)

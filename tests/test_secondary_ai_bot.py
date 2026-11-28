@@ -5,14 +5,27 @@ from types import SimpleNamespace
 import secondary_ai_bot as secondary
 
 
+class FakeSentMessage:
+    def __init__(self, text):
+        self.text = text
+        self.edits = []
+
+    async def edit_text(self, text, **kwargs):
+        self.edits.append((text, kwargs))
+
+
 class FakeMessage:
     def __init__(self, text="hola", chat_id=123):
         self.text = text
         self.chat_id = chat_id
         self.calls = []
+        self.sent = []
 
     async def reply_text(self, text, **kwargs):
         self.calls.append((text, kwargs))
+        sent = FakeSentMessage(text)
+        self.sent.append(sent)
+        return sent
 
 
 class FakeUpdate:
@@ -27,11 +40,11 @@ class FakeUpdate:
 
 class FakeQuery:
     def __init__(self):
-        self.answered = False
+        self.answers = []
         self.edited = []
 
-    async def answer(self):
-        self.answered = True
+    async def answer(self, *args, **kwargs):
+        self.answers.append((args, kwargs))
 
     async def edit_message_text(self, text, **kwargs):
         self.edited.append((text, kwargs))
@@ -87,7 +100,7 @@ def test_pressing_already_joined_unlocks_bot_without_membership_lookup():
 
         await secondary._verify(update, SimpleNamespace())
 
-        assert query.answered
+        assert query.answers
         assert user_id in secondary._JOIN_CONFIRMED
         assert "Acceso listo" in query.edited[0][0]
         assert await secondary._require_access(FakeUpdate(user_id))
@@ -106,7 +119,7 @@ def test_authorized_user_can_use_bot_in_a_group():
     asyncio.run(run())
 
 
-def test_group_ai_response_shows_typing_and_keeps_group_conversation(monkeypatch):
+def test_group_ai_response_shows_typing_and_visible_working_message(monkeypatch):
     async def run():
         user_id = 987
         chat_id = -100456
@@ -123,8 +136,50 @@ def test_group_ai_response_shows_typing_and_keeps_group_conversation(monkeypatch
         await secondary._chat(update, SimpleNamespace(bot=bot))
 
         assert bot.actions == [(chat_id, secondary.ChatAction.TYPING)]
-        assert update.effective_message.calls[-1][0] == "Respuesta de prueba"
+        progress = update.effective_message.sent[0]
+        assert "está trabajando" in progress.text
+        assert progress.edits[-1][0] == "Respuesta de prueba"
         assert (chat_id, user_id) in secondary._HISTORY
+
+    asyncio.run(run())
+
+
+def test_admin_panel_is_private_and_only_available_to_configured_admin():
+    async def run():
+        admin_id = next(iter(secondary.ADMIN_USER_IDS))
+        admin_update = FakeUpdate(admin_id)
+        await secondary._admin(admin_update, SimpleNamespace())
+        admin_text, admin_options = admin_update.effective_message.calls[0]
+        assert "Panel de administración" in admin_text
+        assert admin_options["reply_markup"] is not None
+        assert "actual" in admin_options["reply_markup"].inline_keyboard[0][0].text.lower()
+
+        other_update = FakeUpdate(333)
+        await secondary._admin(other_update, SimpleNamespace())
+        other_text = other_update.effective_message.calls[0][0]
+        assert "No tienes permiso" in other_text
+        assert "Panel de administración" not in other_text
+
+        group_update = FakeUpdate(admin_id, chat_id=-1001, chat_type="group")
+        await secondary._admin(group_update, SimpleNamespace())
+        assert group_update.effective_message.calls == []
+
+    asyncio.run(run())
+
+
+def test_admin_refresh_callback_denies_other_users():
+    async def run():
+        query = FakeQuery()
+        update = SimpleNamespace(
+            callback_query=query,
+            effective_user=SimpleNamespace(id=333),
+            effective_chat=SimpleNamespace(type="private"),
+        )
+
+        await secondary._admin_callback(update, SimpleNamespace())
+
+        assert query.answers[0][1]["show_alert"] is True
+        assert query.edited == []
 
     asyncio.run(run())
 
